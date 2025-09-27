@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Agent</title>
+    <style>
+      body { font-family: Inter, system-ui, Arial; padding: 24px; }
+      .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; max-width: 720px; }
+      textarea { width: 100%; min-height: 120px; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h2>Verify UUID</h2>
+      <input id="uuid" placeholder="Enter your UUID" style="width: 100%;" />
+      <button id="verify">Verify</button>
+      <p id="verify-status"></p>
+    </div>
+
+    <div class="card" style="margin-top: 16px;">
+      <h2>Chat</h2>
+      <textarea id="message" placeholder="Ask the agent..." disabled></textarea>
+      <button id="send" disabled>Send</button>
+      <pre id="reply"></pre>
+    </div>
+
+    <script type="module">
+      const API_URL = 'http://localhost:8080'
+      const AGENT_URL = 'http://localhost:8001'
+      const $ = (id) => document.getElementById(id)
+      let currentUserId = null
+
+      $('verify').onclick = async () => {
+        const id = $('uuid').value.trim()
+        if (!id) return
+        const res = await fetch(`${API_URL}/users/${id}/exists`)
+        const data = await res.json()
+        if (data.exists) {
+          $('verify-status').textContent = 'User verified. You can chat now.'
+          $('message').disabled = false
+          $('send').disabled = false
+          currentUserId = id
+        } else {
+          $('verify-status').textContent = 'User does not exist. Please create an account first.'
+          $('message').disabled = true
+          $('send').disabled = true
+          currentUserId = null
+        }
+      }
+
+      $('send').onclick = async () => {
+        const msg = $('message').value.trim()
+        if (!currentUserId || !msg) return
+        const res = await fetch(`${AGENT_URL}/agent/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: currentUserId, message: msg })
+        })
+        const data = await res.json()
+        $('reply').textContent = JSON.stringify(data, null, 2)
+      }
+    </script>
+  </body>
+</html>

@@ -1,61 +1,36 @@
-// Minimal IndexedDB helper (no deps).
-const DB_NAME = 'healthhub-db'
-const DB_VERSION = 1
-const STORES = ['users', 'syncQueue', 'chatLogs']
+// src/lib/idb.js
+const DB_NAME = 'healthhub';
+const STORE = 'users';
 
-export function openDB() {
+function open() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION)
+    const req = indexedDB.open(DB_NAME, 1);
     req.onupgradeneeded = () => {
-      const db = req.result
-      STORES.forEach(name => {
-        if (!db.objectStoreNames.contains(name)) {
-          db.createObjectStore(name, { keyPath: 'id', autoIncrement: true })
-        }
-      })
-    }
-    req.onsuccess = () => resolve(req.result)
-    req.onerror = () => reject(req.error)
-  })
+      if (!req.result.objectStoreNames.contains(STORE)) {
+        req.result.createObjectStore(STORE, { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
 }
 
-export async function put(store, value) {
-  const db = await openDB()
+export async function put(storeName = STORE, value) {
+  const db = await open();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(store, 'readwrite')
-    tx.objectStore(store).put(value)
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
-  })
+    const tx = db.transaction(storeName, 'readwrite');
+    tx.objectStore(storeName).put(value);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
-export async function get(store, key) {
-  const db = await openDB()
+export async function get(storeName = STORE, id) {
+  const db = await open();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(store, 'readonly')
-    const req = tx.objectStore(store).get(key)
-    req.onsuccess = () => resolve(req.result)
-    req.onerror = () => reject(req.error)
-  })
-}
-
-export async function getAll(store) {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(store, 'readonly')
-    const req = tx.objectStore(store).getAll()
-    req.onsuccess = () => resolve(req.result)
-    req.onerror = () => reject(req.error)
-  })
-}
-
-export async function deleteByIds(store, ids) {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(store, 'readwrite')
-    const s = tx.objectStore(store)
-    ids.forEach(id => s.delete(id))
-    tx.oncomplete = () => resolve()
-    tx.onerror = () => reject(tx.error)
-  })
+    const tx = db.transaction(storeName, 'readonly');
+    const req = tx.objectStore(storeName).get(id);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
 }

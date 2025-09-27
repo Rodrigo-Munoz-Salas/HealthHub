@@ -1,35 +1,23 @@
-import { put, getAll, deleteByIds } from './idb'
+import { Storage } from './storage.js'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
-
-// Enqueue a job for later sync (works offline).
-export async function enqueue(job) {
-  await put('syncQueue', { ...job, createdAt: Date.now() })
+function genId() {
+  return (crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now())
 }
 
-// Attempt to flush queued jobs to server (call on load + 'online').
-export async function flushQueue() {
-  const items = await getAll('syncQueue')
-  if (!items.length) return
+export function enqueue(type, payload) {
+  const item = { id: genId(), type, payload, ts: new Date().toISOString() }
+  const q = Storage.getQueue()
+  q.push(item)
+  Storage.setQueue(q)
+  return item
+}
 
-  // 1) Users (batch upsert)
-  const userJobs = items.filter(i => i.type === 'createUser')
-  if (userJobs.length) {
-    const payload = userJobs.map(j => j.payload)
-    try {
-      const res = await fetch(`${API_URL}/sync/users`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ users: payload })
-      })
-      if (!res.ok) throw new Error('sync/users failed')
-      const toDelete = userJobs.map(j => j.id).filter(Boolean)
-      if (toDelete.length) await deleteByIds('syncQueue', toDelete)
-      console.info('[Queue] Flushed users:', toDelete.length)
-    } catch (e) {
-      console.warn('[Queue] Flush failed:', e.message)
-    }
-  }
+export function peekQueue() {
+  return Storage.getQueue()
+}
 
-  // Add other job types later (e.g., queued chats).
+export function clearQueueItems(ids) {
+  const set = new Set(ids)
+  const remaining = Storage.getQueue().filter(i => !set.has(i.id))
+  Storage.setQueue(remaining)
 }

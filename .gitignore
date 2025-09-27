@@ -3,3 +3,4 @@ ui/.env
 agent/.env
 agent/.venv
 agent/src/__pycache__/
+venv

@@ -4,7 +4,7 @@ run-ui:
 
 # Run the Go API
 run-api:
-	cd internal && go run ./cmd/api
+	cd internal/cmd/api && go run .
 
 # Run the Python Agent
 run-agent:

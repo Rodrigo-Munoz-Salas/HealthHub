@@ -24,6 +24,17 @@ var (
 	usersMu sync.RWMutex
 )
 
+type SyncUsersRequest struct {
+	Users []struct {
+		UUID              string   `json:"uuid"`
+		Name              string   `json:"name"`
+		Age               int      `json:"age"`
+		Weight            float64  `json:"weight"`
+		Height            float64  `json:"height"`
+		MedicalConditions []string `json:"medical_conditions"`
+	} `json:"users"`
+}
+
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -31,10 +42,11 @@ func main() {
 	}
 
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
 
-	// Simple CORS
+	// Single handler with permissive CORS (dev)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if origin := r.Header.Get("Origin"); origin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
@@ -47,17 +59,19 @@ func main() {
 			return
 		}
 
-		path := r.URL.Path
-		if path == "/users" && r.Method == http.MethodPost {
+		switch {
+		case r.URL.Path == "/users" && r.Method == http.MethodPost:
 			createUser(w, r)
 			return
-		}
-		if strings.HasPrefix(path, "/users/") && strings.HasSuffix(path, "/exists") && r.Method == http.MethodGet {
+		case strings.HasPrefix(r.URL.Path, "/users/") && strings.HasSuffix(r.URL.Path, "/exists") && r.Method == http.MethodGet:
 			checkExists(w, r)
 			return
+		case r.URL.Path == "/sync/users" && r.Method == http.MethodPost:
+			syncUsers(w, r)
+			return
+		default:
+			http.NotFound(w, r)
 		}
-
-		http.NotFound(w, r)
 	})
 
 	log.Printf("[Go API] listening on :%s", port)
@@ -68,7 +82,7 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 	var u User
 	if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "invalid json"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid json"})
 		return
 	}
 	log.Printf("[Go API] User information received! Data: %+v", u)
@@ -79,14 +93,14 @@ func createUser(w http.ResponseWriter, r *http.Request) {
 	usersMu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"uuid": id})
+	_ = json.NewEncoder(w).Encode(map[string]string{"uuid": id})
 }
 
 func checkExists(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	if len(parts) < 3 {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]string{"error": "invalid path"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid path"})
 		return
 	}
 	id := parts[1]
@@ -98,5 +112,33 @@ func checkExists(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[Go API] Verify called for uuid=%s => exists=%v", id, ok)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]bool{"exists": ok})
+	_ = json.NewEncoder(w).Encode(map[string]bool{"exists": ok})
+}
+
+func syncUsers(w http.ResponseWriter, r *http.Request) {
+	var req SyncUsersRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid json"})
+		return
+	}
+
+	added := 0
+	for _, u := range req.Users {
+		if u.UUID == "" {
+			continue
+		}
+		usersMu.Lock()
+		users[u.UUID] = User{
+			Name: u.Name, Age: u.Age,
+			Weight: u.Weight, Height: u.Height,
+			MedicalConditions: u.MedicalConditions,
+		}
+		usersMu.Unlock()
+		added++
+	}
+
+	log.Printf("[Go API] /sync/users upserted=%d", added)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"upserted": added})
 }

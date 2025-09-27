@@ -29,20 +29,48 @@
       const API_URL = 'http://localhost:8080'
       const AGENT_URL = 'http://localhost:8001'
       const $ = (id) => document.getElementById(id)
+
+      function openDB() {
+        return new Promise((resolve, reject) => {
+          const req = indexedDB.open('healthhub-db', 1)
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+      }
+      async function getLocalUser(uuid) {
+        const db = await openDB()
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction('users', 'readonly')
+          const store = tx.objectStore('users')
+          const req = store.get(uuid)
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+      }
+
       let currentUserId = null
 
       $('verify').onclick = async () => {
         const id = $('uuid').value.trim()
         if (!id) return
-        const res = await fetch(`${API_URL}/users/${id}/exists`)
-        const data = await res.json()
-        if (data.exists) {
-          $('verify-status').textContent = 'User verified. You can chat now.'
+
+        // Online verify (optional)
+        let existsOnline = false
+        try {
+          const res = await fetch(`${API_URL}/users/${id}/exists`)
+          const data = await res.json()
+          existsOnline = !!data.exists
+        } catch (_) {}
+
+        const localUser = await getLocalUser(id)
+
+        if (existsOnline || localUser) {
+          $('verify-status').textContent = 'User verified (online or local). You can chat now.'
           $('message').disabled = false
           $('send').disabled = false
           currentUserId = id
         } else {
-          $('verify-status').textContent = 'User does not exist. Please create an account first.'
+          $('verify-status').textContent = 'User not found. Please create an account first.'
           $('message').disabled = true
           $('send').disabled = true
           currentUserId = null
@@ -52,10 +80,17 @@
       $('send').onclick = async () => {
         const msg = $('message').value.trim()
         if (!currentUserId || !msg) return
-        const res = await fetch(`${AGENT_URL}/agent/chat`, {
+        const localUser = await getLocalUser(currentUserId)
+
+        // Example: use "profile" agent. You can switch to /agent/triage or /agent/qa.
+        const res = await fetch(`${AGENT_URL}/agent/profile`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: currentUserId, message: msg })
+          body: JSON.stringify({
+            user_id: currentUserId,
+            patient_info: localUser || null,
+            message: msg
+          })
         })
         const data = await res.json()
         $('reply').textContent = JSON.stringify(data, null, 2)

@@ -195,15 +195,25 @@ class WindowsRAGSystem:
             self.embedding_model = None
     
     def _load_tinyllama_model_windows(self):
-        """Load TinyLlama model optimized for Windows"""
+        """Load Qwen2.5-0.5B-Instruct model optimized for Windows (replacing TinyLlama)"""
         try:
-            # Find model path
+            # Find model path - prioritize Qwen2.5-0.5B-Instruct
             possible_paths = [
-                self.models_dir / "quantized_tinyllama_health",
+                # Qwen2.5-0.5B-Instruct paths (prioritized)
+                Path("../../../agent/mobile_models/qwen2_5_0_5b"),
+                Path("../mobile_models/qwen2_5_0_5b"),
+                Path("../../agent/mobile_models/qwen2_5_0_5b"),
+                self.models_dir / "qwen2_5_0_5b",
+                Path("mobile_models/qwen2_5_0_5b"),
+                Path("../agent/mobile_models/qwen2_5_0_5b"),
+                Path("../../mobile_models/qwen2_5_0_5b"),
+                # Fallback to TinyLlama if Qwen not found
                 Path("../mobile_models/quantized_tinyllama_health"),
                 Path("../../agent/mobile_models/quantized_tinyllama_health"),
+                self.models_dir / "quantized_tinyllama_health",
                 Path("mobile_models/quantized_tinyllama_health"),
-                Path("../agent/mobile_models/quantized_tinyllama_health")
+                Path("../agent/mobile_models/quantized_tinyllama_health"),
+                Path("../../mobile_models/quantized_tinyllama_health")
             ]
             
             model_path = None
@@ -213,10 +223,21 @@ class WindowsRAGSystem:
                     break
             
             if model_path is None:
-                logger.warning("⚠️ TinyLlama model not found, using fallback responses")
+                logger.warning("⚠️ No suitable model found, using fallback responses")
                 return
             
-            logger.info("🔄 Loading TinyLlama model (Windows optimized)...")
+            # Check if it's Qwen, Phi-3-mini, or TinyLlama
+            is_qwen = "qwen" in str(model_path).lower()
+            is_phi3 = "phi3" in str(model_path).lower()
+            
+            if is_qwen:
+                model_name = "Qwen2.5-0.5B-Instruct"
+            elif is_phi3:
+                model_name = "Phi-3-mini"
+            else:
+                model_name = "TinyLlama"
+            
+            logger.info(f"🔄 Loading {model_name} model (Windows optimized)...")
             
             # Load tokenizer
             self.llm_tokenizer = AutoTokenizer.from_pretrained(
@@ -225,37 +246,62 @@ class WindowsRAGSystem:
             )
             
             # Windows-optimized model loading
-            if self.device == "cuda":
-                # GPU loading with quantization support
+            if is_qwen:
+                # Qwen2.5-0.5B-Instruct loading (non-quantized, should work perfectly)
+                logger.info("🔄 Loading Qwen2.5-0.5B-Instruct model...")
                 self.llm_model = AutoModelForCausalLM.from_pretrained(
                     str(model_path),
                     trust_remote_code=True,
-                    torch_dtype=torch.float16,
-                    device_map="auto",
+                    torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                    device_map="auto" if self.device == "cuda" else "cpu",
+                    low_cpu_mem_usage=True,
+                    use_safetensors=True
+                )
+            elif is_phi3:
+                # Phi-3-mini loading (non-quantized, should work well)
+                logger.info("🔄 Loading Phi-3-mini model...")
+                self.llm_model = AutoModelForCausalLM.from_pretrained(
+                    str(model_path),
+                    trust_remote_code=True,
+                    torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+                    device_map="auto" if self.device == "cuda" else "cpu",
                     low_cpu_mem_usage=True,
                     use_safetensors=True
                 )
             else:
-                # CPU loading without quantization issues
-                self.llm_model = AutoModelForCausalLM.from_pretrained(
-                    str(model_path),
-                    trust_remote_code=True,
-                    torch_dtype=torch.float32,
-                    device_map="cpu",
-                    low_cpu_mem_usage=True,
-                    use_safetensors=True,
-                    load_in_8bit=False,
-                    load_in_4bit=False
-                )
+                # TinyLlama loading (with fallback approaches for quantized models)
+                logger.info("🔄 Loading TinyLlama model with fallback approaches...")
+                if self.device == "cuda":
+                    # GPU loading with quantization support
+                    self.llm_model = AutoModelForCausalLM.from_pretrained(
+                        str(model_path),
+                        trust_remote_code=True,
+                        torch_dtype=torch.float16,
+                        device_map="auto",
+                        low_cpu_mem_usage=True,
+                        use_safetensors=True
+                    )
+                else:
+                    # CPU loading without quantization issues
+                    self.llm_model = AutoModelForCausalLM.from_pretrained(
+                        str(model_path),
+                        trust_remote_code=True,
+                        torch_dtype=torch.float32,
+                        device_map="cpu",
+                        low_cpu_mem_usage=True,
+                        use_safetensors=True,
+                        load_in_8bit=False,
+                        load_in_4bit=False
+                    )
             
             # Set pad token
             if self.llm_tokenizer.pad_token is None:
                 self.llm_tokenizer.pad_token = self.llm_tokenizer.eos_token
             
-            logger.info(f"✅ TinyLlama model loaded successfully ({self.device} mode)")
+            logger.info(f"✅ {model_name} model loaded successfully ({self.device} mode)")
             
         except Exception as e:
-            logger.warning(f"⚠️ TinyLlama model loading failed: {e}")
+            logger.warning(f"⚠️ Model loading failed: {e}")
             logger.info("💡 Using rule-based responses instead of AI-generated text")
             self.llm_model = None
             self.llm_tokenizer = None
@@ -326,7 +372,7 @@ class WindowsRAGSystem:
             logger.error(f"❌ Error building vector index: {e}")
             self.vector_index = None
     
-    def _generate_response(self, prompt: str, max_length: int = 200) -> str:
+    def _generate_response(self, prompt: str, max_length: int = 75) -> str:
         """Generate response using TinyLlama model"""
         if self.llm_model is None or self.llm_tokenizer is None:
             return "Model not available for text generation."
@@ -344,16 +390,19 @@ class WindowsRAGSystem:
             if self.device == "cuda":
                 inputs = {k: v.to(self.device) for k, v in inputs.items()}
             
-            # Generate response
+            # Generate response with strict parameters for concise output
             with torch.no_grad():
                 outputs = self.llm_model.generate(
                     **inputs,
                     max_new_tokens=max_length,
-                    temperature=0.7,
+                    temperature=0.3,  # Lower temperature for more focused responses
                     do_sample=True,
                     pad_token_id=self.llm_tokenizer.eos_token_id,
                     eos_token_id=self.llm_tokenizer.eos_token_id,
-                    repetition_penalty=1.1
+                    repetition_penalty=1.2,  # Higher repetition penalty
+                    use_cache=False,  # Disable cache for better control
+                    num_beams=1,  # Greedy decoding for consistency
+                    early_stopping=True  # Stop early when EOS is reached
                 )
             
             # Decode response
@@ -507,29 +556,18 @@ class WindowsRAGSystem:
         return None
     
     def _create_rag_prompt(self, query: str, context: List[Dict[str, Any]]) -> str:
-        """Create comprehensive RAG prompt with context"""
-        # Extract relevant context
+        """Create concise RAG prompt optimized for emergency detection and call-to-action"""
+        # Extract key context (much shorter)
         context_text = ""
-        for i, item in enumerate(context[:3], 1):
-            content = item.get("content", "")
-            title = item.get("title", "Health Information")
-            context_text += f"{i}. {title}: {content[:200]}...\n"
+        for item in context[:2]:  # Only use top 2 results
+            title = item.get("title", "Health Info")
+            context_text += f"- {title}\n"
         
-        prompt = f"""You are a medical assistant helping with a health emergency. Use the provided context to give accurate, helpful advice.
+        prompt = f"""Emergency: "{query}"
 
-PATIENT QUERY: "{query}"
-
-RELEVANT MEDICAL CONTEXT:
 {context_text}
 
-INSTRUCTIONS:
-- Provide a natural, conversational response (2-3 sentences)
-- Explain what the symptoms could mean based on the context
-- Give clear guidance on what to do
-- Be reassuring but clear about urgency
-- If it's an emergency, emphasize calling 911
-
-RESPONSE:"""
+Emergency: Yes/No. Action: [seek hospital/see doctor]. Include key symptoms if specific. 25 words max."""
         
         return prompt
     
@@ -555,7 +593,7 @@ RESPONSE:"""
                 ai_response = None
                 if self.llm_model is not None:
                     prompt = self._create_rag_prompt(query, vector_results)
-                    ai_response = self._generate_response(prompt, max_length=200)
+                    ai_response = self._generate_response(prompt, max_length=25)
                 
                 response = {
                     "emergency_type": emergency_type,
@@ -577,7 +615,7 @@ RESPONSE:"""
                 ai_response = None
                 if self.llm_model is not None:
                     prompt = self._create_rag_prompt(query, vector_results)
-                    ai_response = self._generate_response(prompt, max_length=200)
+                    ai_response = self._generate_response(prompt, max_length=25)
                 
                 response = {
                     "emergency_type": "general_health",

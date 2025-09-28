@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Dict, List, Any
 import time
 import logging
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 logger = logging.getLogger(__name__)
 
@@ -25,15 +27,19 @@ class MobileHealthRAG:
         self.vector_db = self._load_vector_database()
         self.emergency_protocols = self._load_emergency_protocols()
         
-        # Initialize mobile models (if available)
+        # Initialize mobile models
         self.llm_model = None
         self.llm_tokenizer = None
         self.embedding_model = None
+        
+        # Load TinyLlama model for local inference
+        self._load_tinyllama_model()
         
         logger.info("🏥 Mobile Health Emergency RAG System Loaded!")
         logger.info(f"📚 Guidelines: {len(self.guidelines)}")
         logger.info(f"🔍 Vector Database: {len(self.vector_db)} guidelines")
         logger.info(f"🚨 Emergency Protocols: {len(self.emergency_protocols)}")
+        logger.info(f"🤖 TinyLlama Model: {'Loaded' if self.llm_model is not None else 'Not Available'}")
     
     def _load_guidelines(self) -> Dict:
         """Load pre-processed guidelines"""
@@ -58,6 +64,92 @@ class MobileHealthRAG:
             with open(protocols_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         return {}
+    
+    def _load_tinyllama_model(self):
+        """Load TinyLlama model for local inference"""
+        try:
+            # Skip model loading for now due to quantization issues on Mac
+            logger.warning("⚠️ Skipping TinyLlama model loading due to quantization compatibility issues on Mac")
+            logger.info("💡 The system will use rule-based responses instead of AI-generated text")
+            self.llm_model = None
+            self.llm_tokenizer = None
+            return
+            
+        except Exception as e:
+            logger.error(f"❌ Error loading TinyLlama model: {e}")
+            self.llm_model = None
+            self.llm_tokenizer = None
+    
+    def _generate_response(self, prompt: str, max_length: int = 200) -> str:
+        """Generate response using TinyLlama model"""
+        if self.llm_model is None or self.llm_tokenizer is None:
+            return "Model not available for text generation."
+        
+        try:
+            # Tokenize input
+            inputs = self.llm_tokenizer(
+                prompt, 
+                return_tensors="pt", 
+                truncation=True, 
+                max_length=512
+            )
+            
+            # Generate response
+            with torch.no_grad():
+                outputs = self.llm_model.generate(
+                    **inputs,
+                    max_new_tokens=max_length,
+                    temperature=0.7,
+                    do_sample=True,
+                    pad_token_id=self.llm_tokenizer.eos_token_id,
+                    eos_token_id=self.llm_tokenizer.eos_token_id
+                )
+            
+            # Decode response
+            response = self.llm_tokenizer.decode(
+                outputs[0][inputs['input_ids'].shape[1]:], 
+                skip_special_tokens=True
+            )
+            
+            return response.strip()
+            
+        except Exception as e:
+            logger.error(f"❌ Error generating response: {e}")
+            return "Error generating response."
+    
+    def _create_emergency_prompt(self, query: str, emergency_type: str, protocol: Dict) -> str:
+        """Create prompt for emergency response generation"""
+        emergency_name = emergency_type.replace('_', ' ').title()
+        immediate_actions = protocol.get("immediate_actions", [])[:3]
+        warning_signs = protocol.get("warning_signs", [])[:3]
+        call_911 = protocol.get("call_911", True)
+        
+        prompt = f"""You are a medical assistant helping with a {emergency_name} emergency. 
+
+Patient Query: "{query}"
+
+Emergency Protocol:
+- Call 911: {call_911}
+- Immediate Actions: {', '.join(immediate_actions)}
+- Warning Signs: {', '.join(warning_signs)}
+
+Provide a natural, conversational response (2-3 sentences) explaining what the symptoms could mean and what to do. Be reassuring but clear about the urgency.
+
+Response:"""
+        
+        return prompt
+    
+    def _create_general_health_prompt(self, query: str) -> str:
+        """Create prompt for general health query generation"""
+        prompt = f"""You are a medical assistant helping with a health concern.
+
+Patient Query: "{query}"
+
+Provide a natural, conversational response (2-3 sentences) explaining what the symptoms could mean and general guidance. Be helpful but always recommend consulting a healthcare provider.
+
+Response:"""
+        
+        return prompt
     
     def query_emergency(self, query: str) -> Dict[str, Any]:
         """Query the mobile RAG system for health emergencies"""
@@ -86,6 +178,14 @@ class MobileHealthRAG:
             # Get relevant information
             if emergency_type and emergency_type in self.emergency_protocols:
                 protocol = self.emergency_protocols[emergency_type]
+                
+                # Generate natural language response using TinyLlama
+                if self.llm_model is not None:
+                    prompt = self._create_emergency_prompt(query, emergency_type, protocol)
+                    generated_response = self._generate_response(prompt, max_length=150)
+                else:
+                    generated_response = None
+                
                 response = {
                     "emergency_type": emergency_type,
                     "protocol": protocol,
@@ -93,11 +193,18 @@ class MobileHealthRAG:
                     "warning_signs": protocol["warning_signs"],
                     "call_911": protocol.get("call_911", True),
                     "confidence": 0.9,
-                    "source": "emergency_protocols"
+                    "source": "emergency_protocols",
+                    "generated_response": generated_response
                 }
             else:
                 # Use vector search for general health queries
                 response = self._vector_search(query)
+                
+                # Generate response for general health queries too
+                if self.llm_model is not None:
+                    prompt = self._create_general_health_prompt(query)
+                    generated_response = self._generate_response(prompt, max_length=150)
+                    response["generated_response"] = generated_response
             
             response["query_time"] = time.time() - start_time
             response["timestamp"] = time.time()

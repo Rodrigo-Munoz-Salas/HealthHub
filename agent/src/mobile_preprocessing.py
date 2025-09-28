@@ -11,9 +11,15 @@ from pathlib import Path
 from typing import Dict, List, Any
 import time
 
-# RagAnything imports
-from raganything import RAGAnything, RAGAnythingConfig
-from lightrag.utils import EmbeddingFunc
+# RagAnything imports - using direct imports to avoid compatibility issues
+try:
+    from raganything import RAGAnything, RAGAnythingConfig
+    from lightrag.utils import EmbeddingFunc
+except ImportError:
+    # Fallback: Skip RagAnything imports for mobile preprocessing
+    RAGAnything = None
+    RAGAnythingConfig = None
+    EmbeddingFunc = None
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from sentence_transformers import SentenceTransformer
 
@@ -21,7 +27,7 @@ class MobileRAGPreprocessor:
     """Pre-builds everything for mobile RAG deployment"""
     
     def __init__(self, 
-                 guidelines_dir: str = "../guidelines",
+                 guidelines_dir: str = "/Users/darkknight/Desktop/HealthHub/guidelines",
                  output_dir: str = "mobile_rag_ready"):
         self.guidelines_dir = Path(guidelines_dir)
         self.output_dir = Path(output_dir)
@@ -639,7 +645,7 @@ def main():
     
     # Step 5: Create deployment package
     print("\nStep 5: Creating mobile deployment package...")
-    if not preprocessor.create_mobile_deployment_package():
+    if not preprocessor.create_deployment_package():
         print("❌ Failed to create deployment package")
         return
     

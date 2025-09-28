@@ -222,18 +222,27 @@ function AIConsole() {
   const [messages, setMessages] = React.useState([])
 
   async function send() {
-    const text = input.trim()
-    if (!text) return
-    setMessages((m) => [...m, { role: 'user', content: text, ts: Date.now() }])
-    setInput('')
-    try {
-      const data = await sendChatToAgent(text)     // ✅ talk to the agent
-      const reply = data?.reply || 'No reply.'
-      setMessages((m) => [...m, { role: 'assistant', content: reply, ts: Date.now() }])
-    } catch {
-      setMessages((m) => [...m, { role: 'assistant', content: 'Failed to reach agent.', ts: Date.now() }])
-    }
+  const text = input.trim()
+  if (!text) return
+  setMessages(m => [...m, { role: 'user', content: text, ts: Date.now() }])
+  setInput('')
+  try {
+    const data = await sendChatToAgent(text)               // { reply, source, meta }
+    setMessages(m => [
+      ...m,
+      {
+        role: 'assistant',
+        content: data?.reply || 'No reply.',
+        source: data?.source || null,                      // <-- keep it
+        meta: data?.meta || null,                          // <-- optional extras
+        ts: Date.now()
+      }
+    ])
+  } catch {
+    setMessages(m => [...m, { role: 'assistant', content: 'Failed to reach agent.', ts: Date.now() }])
   }
+}
+
 
   return (
     <Card>
@@ -244,19 +253,31 @@ function AIConsole() {
             <div className="text-sm text-zinc-500 dark:text-zinc-400">No messages yet.</div>
           )}
           {messages.map((m, i) => (
-            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div
-                className={[
-                  'max-w-[75%] rounded-2xl px-3 py-2 text-sm shadow-sm',
-                  m.role === 'user'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100',
-                ].join(' ')}
-              >
-                {m.content}
-              </div>
-            </div>
-          ))}
+  <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+    <div
+      className={[
+        'max-w-[75%] rounded-2xl px-3 py-2 text-sm shadow-sm',
+        m.role === 'user'
+          ? 'bg-blue-600 text-white'
+          : 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100',
+      ].join(' ')}
+    >
+      <div>{m.content}</div>
+
+      {/* tiny footer only for assistant */}
+      {m.role !== 'user' && (m.source || m.meta) && (
+        <div className="mt-1 text-[10px] text-zinc-500 dark:text-zinc-400">
+          {m.source ? `via ${m.source}` : null}
+          {m.meta?.emergency_type ? ` • ${m.meta.emergency_type}` : null}
+          {typeof m.meta?.confidence === 'number'
+            ? ` • conf ${(m.meta.confidence * 100).toFixed(0)}%`
+            : null}
+        </div>
+      )}
+    </div>
+  </div>
+))}
+
         </div>
         <div className="grid gap-3 md:grid-cols-[1fr_auto]">
           <input

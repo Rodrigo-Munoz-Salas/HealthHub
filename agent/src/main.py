@@ -83,31 +83,50 @@ def chat(req: ChatRequest):
     If RAG is ready -> use it.
     Else -> rule fallback.
     """
-    text = req.message.strip()
+    text = (req.message or "").strip()
     patient = (req.patient_info or {}).get("patient") or (req.patient_info or {})
     user = (req.patient_info or {}).get("user") or {}
 
     if not text:
         return {"reply": "Please describe how you're feeling.", "source": "validation"}
 
-    # Try RAG first
-    if RAG_STATUS.get("system_ready"):
-        res = rag_answer(text)
-        if "error" not in res:
-            reply = res.get("natural_response") or res.get("response") or "I have analyzed your message."
-            return {
-                "reply": reply,
-                "source": "rag",
-                "meta": {
-                    "emergency_type": res.get("emergency_type"),
-                    "call_911": res.get("call_911"),
-                    "confidence": res.get("confidence"),
-                    "processing_time": res.get("processing_time"),
-                }
-            }
-        else:
-            log.warning("[RAG fallback] %s", res["error"])
+    try:
+        if RAG_STATUS.get("system_ready"):
+            res = rag_answer(text)
 
-    # Fallback rules
-    reply = rule_fallback(text, patient or user)
-    return {"reply": reply, "source": "rules"}
+            if "error" not in res:
+                reply = (
+                    res.get("natural_response")
+                    or res.get("response")
+                    or "I've analyzed your message."
+                )
+                # 🔴 Log clearly which path was used
+                log.info("[CHAT] USING RAG | et=%s | c911=%s | conf=%s",
+                         res.get("emergency_type"),
+                         res.get("call_911"),
+                         res.get("confidence"))
+                return {
+                    "reply": reply,
+                    "source": "rag",
+                    "meta": {
+                        "emergency_type": res.get("emergency_type"),
+                        "call_911": res.get("call_911"),
+                        "confidence": res.get("confidence"),
+                        "processing_time": res.get("processing_time"),
+                    },
+                }
+            else:
+                log.warning("[CHAT] RAG error -> falling back to rules: %s", res["error"])
+
+        # Rule fallback
+        reply = rule_fallback(text, patient or user)
+        log.info("[CHAT] USING RULES")
+        return {"reply": reply, "source": "rules"}
+
+    except Exception as e:
+        log.exception("[CHAT] Unexpected error")
+        return {
+            "reply": "I hit an unexpected error. Please try again.",
+            "source": "server_error",
+        }
+

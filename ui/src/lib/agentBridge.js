@@ -22,13 +22,16 @@ export async function sendPatientToAgent() {
 }
 
 export async function sendChatToAgent(message) {
-  const user = Storage.getUser() ?? {};
-  const patient = Storage.getPatient() ?? {};
+  const payload = {
+    message,
+    patient_info: { user: Storage.getUser(), patient: Storage.getPatient?.() }
+  }
+
   const res = await fetch('/py/agent/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user_id: user.uuid, message, patient_info: patient }),
-  });
-  if (!res.ok) throw new Error(`Agent error ${res.status}`);
-  return res.json();
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) throw new Error('agent error')
+  return res.json()           // <-- includes { reply, source, meta }
 }

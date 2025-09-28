@@ -5,3 +5,6 @@ agent/.venv
 agent/src/__pycache__/
 internal/cmd/api/.env
 venv/
+# Models
+agent/mobile_models/
+*.safetensors

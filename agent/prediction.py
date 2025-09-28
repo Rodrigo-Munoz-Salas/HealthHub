@@ -1,4 +1,5 @@
-# FastAPI + LangChain chat with in-memory history and an ADK-style predictor tool.
+# server.py
+# FastAPI + LangChain chat with in-memory history + ADK-style predictor tool grounded via RAG-Anything.
 # No database. Frontend sends strict JSON: { session_id, envelope: { user, chat[] } }
 # Not medical advice. Prototype only.
 
@@ -6,7 +7,7 @@ import os, json, re, asyncio
 from typing import Dict, List, Literal
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator  # Pydantic v2
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnableLambda
 from langchain_core.runnables.history import RunnableWithMessageHistory
@@ -16,7 +17,7 @@ from langchain.tools import StructuredTool
 # ─────────────────────────────────────────
 # Config
 # ─────────────────────────────────────────
-CHAT_WINDOW_TURNS = 12
+CHAT_WINDOW_TURNS = int(os.getenv("CHAT_WINDOW_TURNS", "12"))
 
 # ─────────────────────────────────────────
 # Safety: simple red-flag detector
@@ -127,23 +128,40 @@ class ChatReq(BaseModel):
     envelope: ChatEnvelope
 
 # ─────────────────────────────────────────
-# Predictor prompting (ADK tool)
+# RAG-Anything client (import + instance)
+# ─────────────────────────────────────────
+from rag_client import RAGAnythingClient
+rag = RAGAnythingClient(base_url=os.getenv("RAG_ANYTHING_URL", "http://localhost:9999"))
+
+def make_evidence_block(chunks: List[Dict], max_chars: int = 3500):
+    lines, citations, used = [], [], 0
+    for ch in chunks:
+        tag = ch.get("source_id") or "unknown"
+        block = f"[{tag}]\n{ch['content'].strip()}\n"
+        if used + len(block) > max_chars:
+            break
+        lines.append(block); citations.append(tag); used += len(block)
+    return "\n".join(lines), citations
+
+# ─────────────────────────────────────────
+# Predictor prompting (ADK tool) with RAG grounding
 # ─────────────────────────────────────────
 PREDICT_SYSTEM = (
     "You are a cautious clinical reasoning assistant for prototyping only. "
     "You DO NOT give medical advice or diagnoses. "
-    "Estimate LIKELY conditions from the patient's profile and current input. "
-    "Output STRICT JSON with keys: triage_level, top_conditions, rationale, citations, missing_critical_info, disclaimer. "
-    "triage_level ∈ {red,yellow,green}. "
-    "top_conditions is an array of {code, name, confidence}. "
-    "If red-flag symptoms are present, triage_level MUST be 'red'. "
-    "Keep rationale ≤2 sentences. Citations may be ['local_record']."
+    "Ground your reasoning ONLY in the patient data and the EVIDENCE block. "
+    "If evidence is insufficient, be conservative.\n\n"
+    "Output STRICT JSON with keys: triage_level, top_conditions, rationale, citations, "
+    "missing_critical_info, disclaimer. triage_level ∈ {red,yellow,green}. "
+    "top_conditions: array of {code, name, confidence}. Rationale ≤2 sentences. "
+    "List citation IDs exactly as shown in EVIDENCE."
 )
 
-def build_predict_user(profile: Dict, current_input: str) -> str:
+def build_predict_user(profile: Dict, current_input: str, evidence_block: str) -> str:
     return (
         f"PROFILE_JSON:\n{json.dumps(profile, ensure_ascii=False)}\n\n"
         f"CURRENT_INPUT:\n{current_input}\n\n"
+        f"EVIDENCE (each block prefixed with [id]):\n{evidence_block or '(no retrieved evidence)'}\n\n"
         "Return ONLY the JSON object described above."
     )
 
@@ -153,16 +171,23 @@ class PredictArgs(BaseModel):
     profile: Dict  # strict: must be present
 
 async def predictor_tool_fn(user_id: str, current_input: str, profile: Dict) -> str:
-    # pre-scan red flags from current input
+    # Red-flag prefilter
     red_prefilter = has_red_flags(current_input)
 
-    # build prompt
-    user_prompt = build_predict_user(profile, current_input)
+    # Retrieve grounding evidence from RAG-Anything
+    try:
+        raw_chunks = rag.retrieve(current_input, k=5)
+    except Exception:
+        raw_chunks = []
+    evidence_block, rag_citations = make_evidence_block(raw_chunks)
 
-    # call local model; expect strict JSON
+    # Build prompt with evidence
+    user_prompt = build_predict_user(profile, current_input, evidence_block)
+
+    # Call local LLM; expect strict JSON string
     raw = await llm_client.complete(system=PREDICT_SYSTEM, user=user_prompt, temperature=0.1, max_tokens=700)
 
-    # validate or fallback
+    # Validate or fallback
     try:
         obj = validate_prediction_json(raw)
     except Exception as e:
@@ -170,7 +195,7 @@ async def predictor_tool_fn(user_id: str, current_input: str, profile: Dict) -> 
             "triage_level": "red" if red_prefilter else "yellow",
             "top_conditions": [{"code":"UNSURE","name":"Uncertain","confidence":0.0}],
             "rationale": f"Model output invalid ({str(e)}). Fallback engaged.",
-            "citations": ["local_record"],
+            "citations": rag_citations,  # still surface evidence IDs on fallback
             "missing_critical_info": ["onset_time","duration","severity_scale","associated_symptoms"],
             "disclaimer": "Prototype only. Not medical advice."
         }
@@ -178,25 +203,28 @@ async def predictor_tool_fn(user_id: str, current_input: str, profile: Dict) -> 
     if red_prefilter and obj.get("triage_level") != "red":
         obj["triage_level"] = "red"
 
-    bundle = {
+    # Ensure citations include RAG IDs
+    obj.setdefault("citations", [])
+    existing = set(obj["citations"])
+    for cid in rag_citations:
+        if cid not in existing:
+            obj["citations"].append(cid); existing.add(cid)
+
+    return json.dumps({
         "prediction": obj,
-        "input_bundle": {
-            "profile": profile,
-            "current_input": current_input
-        },
-        "model_info": {"provider":"local","model_name":"my-small-llm","prompt_version":"v1"}
-    }
-    return json.dumps(bundle)
+        "input_bundle": {"profile": profile, "current_input": current_input},
+        "model_info": {"provider":"local+rag", "model_name":"my-small-llm", "prompt_version":"v1-rag"}
+    })
 
 predict_tool = StructuredTool.from_function(
     coroutine=predictor_tool_fn,
     name="condition_predictor",
-    description="Estimate likely conditions and triage from profile + current input. Returns strict JSON.",
+    description="Estimate likely conditions and triage from profile + current input (RAG-grounded). Returns strict JSON.",
     args_schema=PredictArgs,
 )
 
 # ─────────────────────────────────────────
-# Chat chain with in-memory history
+# Chat chain with in-memory history (short window)
 # ─────────────────────────────────────────
 SYSTEM_PROMPT = (
     "You are a careful, supportive health chat assistant for prototyping only.\n"
@@ -245,9 +273,9 @@ async def router_fn(inputs: dict):
     text = inputs["input"]
     user_id = inputs["user_id"]
     session_id = inputs.get("session_id", "default")
-    profile_json = inputs["profile"]  # required in our flow
+    profile_json = inputs["profile"]  # required
 
-    # emergency check
+    # Emergency check
     if has_red_flags(text):
         res = await chat_with_memory.ainvoke({"input": text}, config={"configurable":{"session_id": session_id}})
         out = res["output"]
@@ -256,7 +284,7 @@ async def router_fn(inputs: dict):
                     "trouble breathing, stroke-like symptoms), please seek emergency care now. Not medical advice.")
         return {"output": out}
 
-    # ask for assessment → call ADK tool
+    # Ask for assessment → call ADK tool
     if DIAG_RE.search(text):
         payload = await predict_tool.ainvoke({
             "user_id": user_id,
@@ -274,7 +302,7 @@ async def router_fn(inputs: dict):
                                        config={"configurable":{"session_id": session_id}})
         return {"output": summary, "data": data}
 
-    # normal chat
+    # Normal chat
     return await chat_with_memory.ainvoke({"input": text}, config={"configurable":{"session_id": session_id}})
 
 router = RunnableLambda(router_fn)

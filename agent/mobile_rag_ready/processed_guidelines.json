@@ -1,0 +1,102 @@
+{
+  "choking_emergency": {
+    "filename": "choking_emergency.txt",
+    "content": "Choking Emergency Response\n\nIMMEDIATE ACTIONS:\n1. Call 911 immediately\n2. Perform Heimlich maneuver\n3. Check for visible object in throat\n4. Position person forward\n5. Monitor breathing continuously\n\nHEIMLICH MANEUVER:\n- Stand behind person\n- Place hands just above navel\n- Give quick upward thrusts\n- Continue until object is expelled\n- Check mouth for object\n\nWARNING SIGNS:\n- Cannot speak or cough\n- Blue lips or face\n- Loss of consciousness\n- Weak, ineffective cough\n- High-pitched breathing sounds\n\nEMERGENCY LEVEL: CRITICAL\n- Choking can be fatal within minutes\n- Time is critical\n- Call 911 immediately\n\nPREVENTION:\n- Cut food into small pieces\n- Chew food thoroughly\n- Avoid talking while eating\n- Keep small objects away from children\n- Learn first aid techniques\n",
+    "title": "Choking Emergency Response",
+    "keywords": [
+      "avoid",
+      "high-pitched",
+      "into",
+      "within",
+      "hands",
+      "keep",
+      "just",
+      "chew",
+      "perform",
+      "children"
+    ],
+    "emergency_level": "critical",
+    "word_count": 126,
+    "processed_at": 1759025058.997369
+  },
+  "fainting_protocol": {
+    "filename": "fainting_protocol.txt",
+    "content": "Fainting Emergency Protocol\n\nIMMEDIATE RESPONSE:\n1. Check if person is breathing\n2. Call 911 if not breathing or unconscious\n3. Position person on their side (recovery position)\n4. Elevate legs if conscious\n5. Monitor vital signs continuously\n\nWARNING SIGNS:\n- Not breathing\n- No pulse\n- Seizures\n- Head injury from fall\n- Chest pain\n- Severe headache\n\nRECOVERY POSITION:\n- Place person on their side\n- Tilt head back to keep airway open\n- Bend top leg at knee for stability\n- Monitor breathing and pulse\n\nEMERGENCY LEVEL: CRITICAL\n- Loss of consciousness requires immediate medical attention\n- Time is critical for brain function\n- Call 911 immediately\n\nPREVENTION:\n- Stay hydrated\n- Avoid standing up too quickly\n- Eat regular meals\n- Manage blood pressure\n- Regular medical checkups\n",
+    "title": "Fainting Emergency Protocol",
+    "keywords": [
+      "response:",
+      "brain",
+      "keep",
+      "avoid",
+      "fall",
+      "legs",
+      "position)",
+      "place",
+      "blood",
+      "immediately"
+    ],
+    "emergency_level": "critical",
+    "word_count": 131,
+    "processed_at": 1759025058.9974442
+  },
+  "severe_burn_treatment": {
+    "filename": "severe_burn_treatment.txt",
+    "content": "Severe Burn Treatment Guidelines\n\nIMMEDIATE ACTIONS:\n1. Remove person from heat source immediately\n2. Cool with room temperature water (not ice)\n3. Do not use ice or very cold water\n4. Cover with clean, dry cloth\n5. Call 911 for severe burns\n\nSEVERE BURN INDICATORS:\n- Large burn area (bigger than palm)\n- White or charred skin\n- Difficulty breathing\n- Burn on face, hands, or genitals\n- Deep burn (third degree)\n\nDO NOT:\n- Apply ice or very cold water\n- Break blisters\n- Apply butter, oil, or ointments\n- Remove clothing stuck to burn\n- Give food or water if severe\n\nEMERGENCY LEVEL: HIGH\n- Severe burns require immediate medical attention\n- Risk of infection and shock\n- Call 911 immediately\n\nFIRST AID:\n- Cool with room temperature water for 10-15 minutes\n- Cover with clean, dry cloth\n- Keep person warm and comfortable\n- Monitor for signs of shock\n",
+    "title": "Severe Burn Treatment Guidelines",
+    "keywords": [
+      "(not",
+      "keep",
+      "aid:",
+      "heat",
+      "area",
+      "cover",
+      "immediately",
+      "cool",
+      "palm)",
+      "shock"
+    ],
+    "emergency_level": "critical",
+    "word_count": 152,
+    "processed_at": 1759025058.9975119
+  },
+  "stroke_recognition": {
+    "filename": "stroke_recognition.txt",
+    "content": "Stroke Recognition and Response\n\nIMMEDIATE ACTIONS:\n1. Call 911 immediately\n2. Note time of onset\n3. Keep person calm and still\n4. Do not give food or water\n5. Monitor vital signs\n\nSTROKE SYMPTOMS (FAST):\n- F: Facial drooping\n- A: Arm weakness\n- S: Speech difficulties\n- T: Time to call 911\n\nADDITIONAL SIGNS:\n- Sudden severe headache\n- Vision problems\n- Dizziness or loss of balance\n- Confusion or disorientation\n- Numbness on one side\n\nEMERGENCY LEVEL: CRITICAL\n- Stroke is a medical emergency\n- Time is critical for treatment\n- Call 911 immediately\n- Note time symptoms started\n\nPREVENTION:\n- Control blood pressure\n- Manage diabetes\n- Maintain healthy cholesterol\n- Exercise regularly\n- Avoid smoking\n- Limit alcohol consumption\n",
+    "title": "Stroke Recognition and Response",
+    "keywords": [
+      "maintain",
+      "avoid",
+      "keep",
+      "control",
+      "facial",
+      "blood",
+      "immediately",
+      "(fast):",
+      "problems",
+      "alcohol"
+    ],
+    "emergency_level": "critical",
+    "word_count": 123,
+    "processed_at": 1759025058.997563
+  },
+  "chest_pain_emergency": {
+    "filename": "chest_pain_emergency.txt",
+    "content": "Chest Pain Emergency Guidelines\n\nIMMEDIATE ACTIONS:\n1. Call 911 immediately if experiencing chest pain\n2. Have the person sit down and rest\n3. Loosen any tight clothing\n4. Monitor breathing and consciousness\n5. Do not give food or water\n\nWARNING SIGNS:\n- Shortness of breath\n- Nausea or vomiting\n- Sweating\n- Pain radiating to arm, jaw, or back\n- Dizziness or fainting\n- Pressure or squeezing sensation in chest\n\nEMERGENCY LEVEL: CRITICAL\n- Any chest pain should be treated as a potential heart attack\n- Time is critical - call 911 immediately\n- Do not delay seeking medical attention\n\nPREVENTION:\n- Maintain healthy blood pressure\n- Control cholesterol levels\n- Exercise regularly\n- Avoid smoking\n- Manage stress levels\n- Regular medical checkups\n",
+    "title": "Chest Pain Emergency Guidelines",
+    "keywords": [
+      "maintain",
+      "delay",
+      "avoid",
+      "have",
+      "attack",
+      "radiating",
+      "control",
+      "blood",
+      "immediately",
+      "fainting"
+    ],
+    "emergency_level": "critical",
+    "word_count": 124,
+    "processed_at": 1759025058.997619
+  }
+}

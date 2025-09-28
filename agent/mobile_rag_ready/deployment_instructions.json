@@ -1,0 +1,32 @@
+{
+  "mobile_deployment": {
+    "title": "Mobile Health Emergency RAG Deployment",
+    "description": "Complete mobile RAG system for health emergencies",
+    "files": {
+      "mobile_health_rag.py": "Main mobile RAG system",
+      "processed_guidelines.json": "Pre-processed health guidelines",
+      "vector_database.pkl": "Pre-built vector database",
+      "emergency_protocols.json": "Pre-built emergency protocols"
+    },
+    "deployment_steps": [
+      "1. Copy 'mobile_rag_ready' folder to mobile device",
+      "2. Copy 'mobile_models' folder to mobile device",
+      "3. Install Python dependencies on mobile",
+      "4. Run: python mobile_health_rag.py",
+      "5. System is ready for health emergency queries"
+    ],
+    "mobile_requirements": [
+      "Python 3.8+",
+      "torch>=2.2.0",
+      "transformers>=4.36.0",
+      "sentence-transformers>=2.2.2",
+      "numpy>=1.24.3"
+    ],
+    "performance": {
+      "startup_time": "< 5 seconds",
+      "query_time": "< 1 second",
+      "memory_usage": "< 500MB",
+      "storage_required": "~700MB"
+    }
+  }
+}

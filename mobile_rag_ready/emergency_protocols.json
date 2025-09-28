@@ -1,0 +1,132 @@
+{
+  "chest_pain": {
+    "title": "Chest Pain Emergency Protocol",
+    "keywords": [
+      "chest pain",
+      "heart attack",
+      "cardiac",
+      "heart",
+      "chest",
+      "pain"
+    ],
+    "immediate_actions": [
+      "Call 911 immediately",
+      "Have person sit down and rest",
+      "Loosen tight clothing",
+      "Monitor breathing and consciousness",
+      "Do not give food or water"
+    ],
+    "warning_signs": [
+      "Shortness of breath",
+      "Nausea or vomiting",
+      "Sweating",
+      "Pain in arm, jaw, or back",
+      "Dizziness or fainting"
+    ],
+    "call_911": true,
+    "emergency_level": "critical"
+  },
+  "fainting": {
+    "title": "Fainting Emergency Protocol",
+    "keywords": [
+      "fainted",
+      "fainting",
+      "unconscious",
+      "passed out",
+      "collapsed"
+    ],
+    "immediate_actions": [
+      "Check if person is breathing",
+      "Call 911 if not breathing",
+      "Position person on their side",
+      "Elevate legs if conscious",
+      "Monitor vital signs"
+    ],
+    "warning_signs": [
+      "Not breathing",
+      "No pulse",
+      "Seizures",
+      "Head injury",
+      "Chest pain"
+    ],
+    "call_911": true,
+    "emergency_level": "critical"
+  },
+  "severe_burn": {
+    "title": "Severe Burn Emergency Protocol",
+    "keywords": [
+      "burn",
+      "burned",
+      "fire",
+      "hot",
+      "scald",
+      "thermal"
+    ],
+    "immediate_actions": [
+      "Remove from heat source",
+      "Cool with room temperature water",
+      "Do not use ice or cold water",
+      "Cover with clean, dry cloth",
+      "Call 911 for severe burns"
+    ],
+    "warning_signs": [
+      "Large burn area",
+      "White or charred skin",
+      "Difficulty breathing",
+      "Burn on face, hands, or genitals"
+    ],
+    "call_911": true,
+    "emergency_level": "high"
+  },
+  "choking": {
+    "title": "Choking Emergency Protocol",
+    "keywords": [
+      "choking",
+      "can't breathe",
+      "blocked airway",
+      "choking",
+      "suffocating"
+    ],
+    "immediate_actions": [
+      "Call 911 immediately",
+      "Perform Heimlich maneuver",
+      "Check for object in throat",
+      "Position person forward",
+      "Monitor breathing"
+    ],
+    "warning_signs": [
+      "Cannot speak or cough",
+      "Blue lips or face",
+      "Loss of consciousness",
+      "Weak cough"
+    ],
+    "call_911": true,
+    "emergency_level": "critical"
+  },
+  "stroke": {
+    "title": "Stroke Emergency Protocol",
+    "keywords": [
+      "stroke",
+      "facial droop",
+      "slurred speech",
+      "weakness",
+      "paralysis"
+    ],
+    "immediate_actions": [
+      "Call 911 immediately",
+      "Note time of onset",
+      "Keep person calm and still",
+      "Do not give food or water",
+      "Monitor vital signs"
+    ],
+    "warning_signs": [
+      "Facial drooping",
+      "Arm weakness",
+      "Speech difficulties",
+      "Sudden severe headache",
+      "Vision problems"
+    ],
+    "call_911": true,
+    "emergency_level": "critical"
+  }
+}

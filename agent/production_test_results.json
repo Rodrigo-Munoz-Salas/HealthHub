@@ -1,0 +1,106 @@
+{
+  "test_summary": {
+    "total_tests": 7,
+    "passed_tests": 5,
+    "failed_tests": 2,
+    "success_rate": "71.4%",
+    "total_time": "173.71s"
+  },
+  "system_tests": {
+    "windows_rag": {
+      "test_name": "Windows RAG System",
+      "status": "PASS",
+      "system_ready": true,
+      "guidelines_loaded": false,
+      "protocols_loaded": false,
+      "model_loaded": true,
+      "embedding_loaded": true,
+      "vector_index_built": false,
+      "query_response": "No response...",
+      "response_time": 0,
+      "confidence": 0.3
+    },
+    "mobile_rag": {
+      "test_name": "Mobile RAG System",
+      "status": "PASS",
+      "system_ready": true,
+      "guidelines_loaded": true,
+      "protocols_loaded": true,
+      "vector_db_loaded": true,
+      "model_loaded": false,
+      "query_response": "No response...",
+      "response_time": 0.0,
+      "confidence": 0.9
+    },
+    "health_agent": {
+      "test_name": "Health Emergency Agent",
+      "status": "PASS",
+      "agent_ready": true,
+      "mobile_rag_ready": true,
+      "windows_rag_ready": true,
+      "user_input_processed": true,
+      "emergency_query_handled": true,
+      "response_length": 21,
+      "emergency_response": "Emergency guidance not available...",
+      "call_911_recommended": false
+    }
+  },
+  "emergency_scenarios": [
+    {
+      "scenario": "Chest Pain Emergency",
+      "query": "I have severe chest pain radiating to my left arm",
+      "windows_rag_911": false,
+      "mobile_rag_911": true,
+      "windows_confidence": 0.3,
+      "mobile_confidence": 0.9,
+      "windows_response_time": 0,
+      "mobile_response_time": 0.0,
+      "expected_911": true,
+      "windows_911_correct": false,
+      "mobile_911_correct": true
+    },
+    {
+      "scenario": "Choking Emergency",
+      "query": "Someone is choking and turning blue",
+      "windows_rag_911": false,
+      "mobile_rag_911": true,
+      "windows_confidence": 0.3,
+      "mobile_confidence": 0.9,
+      "windows_response_time": 0,
+      "mobile_response_time": 0.0,
+      "expected_911": true,
+      "windows_911_correct": false,
+      "mobile_911_correct": true
+    },
+    {
+      "scenario": "Burn Treatment",
+      "query": "I burned my hand on hot water",
+      "windows_rag_911": false,
+      "mobile_rag_911": false,
+      "windows_confidence": 0.3,
+      "mobile_confidence": 0.3,
+      "windows_response_time": 0,
+      "mobile_response_time": 0.0,
+      "expected_911": false,
+      "windows_911_correct": true,
+      "mobile_911_correct": true
+    },
+    {
+      "scenario": "General Health Question",
+      "query": "What should I do for a mild headache?",
+      "windows_rag_911": false,
+      "mobile_rag_911": false,
+      "windows_confidence": 0.3,
+      "mobile_confidence": 0.3,
+      "windows_response_time": 0,
+      "mobile_response_time": 0.0,
+      "expected_911": false,
+      "windows_911_correct": true,
+      "mobile_911_correct": true
+    }
+  ],
+  "recommendations": [
+    "Mobile RAG model not loaded - check model quantization",
+    "Some emergency scenarios have incorrect 911 recommendations - review emergency detection logic"
+  ]
+}

@@ -43,6 +43,7 @@ func (HistoryModel) TableName() string { return "history" }
 /* ---------- API Payloads ---------- */
 
 type CreateUserRequest struct {
+	UUID              string   `json:"uuid"` // ← client-generated; optional for legacy creates
 	Name              string   `json:"name"`
 	Age               int      `json:"age"`
 	Weight            float64  `json:"weight"`
@@ -65,7 +66,7 @@ type QueueItem struct {
 	ID      string          `json:"id"`
 	Type    string          `json:"type"` // "createUser" | "updateUser"
 	Ts      string          `json:"ts"`
-	Payload json.RawMessage `json:"payload"` // same shape as CreateUserRequest
+	Payload json.RawMessage `json:"payload"` // shape: CreateUserRequest
 }
 type SyncBatchRequest struct {
 	Items []QueueItem `json:"items"`
@@ -93,9 +94,16 @@ func main() {
 
 	// Connect DB
 	gdb, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{
-		Logger:                                   logger.Default.LogMode(logger.Silent), // or logger.Error
+		Logger: logger.New(
+			log.New(os.Stdout, "\r\n", log.LstdFlags),
+			logger.Config{
+				LogLevel:                  logger.Error, // only errors
+				IgnoreRecordNotFoundError: true,         // don't log ErrRecordNotFound
+			},
+		),
 		DisableForeignKeyConstraintWhenMigrating: true,
 	})
+
 	if err != nil {
 		log.Fatalf("connect db: %v", err)
 	}
@@ -148,7 +156,7 @@ END$$;
 	r.Post("/users", api.handlerCreateUser)
 	r.Get("/users/{uuid}/exists", api.handlerCheckExists)
 	r.Post("/sync/users", api.handlerSyncUsers) // legacy/alternate
-	r.Post("/api/sync", api.handlerSync)        // <-- UI queue posts here
+	r.Post("/api/sync", api.handlerSync)        // UI queue posts here
 
 	log.Printf("[Go API] listening on :%s", port)
 	log.Println("GORM/Postgres ready")
@@ -157,31 +165,74 @@ END$$;
 
 /* ---------- Helpers ---------- */
 
-// Reusable upsert + history insert used by multiple handlers.
+// upsertUserHistory prefers client UUID (if provided). If UUID is present:
+//   - find by UUID; update name (if provided) and append history
+//   - if not found, create user with that UUID
+//
+// If UUID is empty:
+//   - upsert by name (legacy behavior)
 func (a *apiConfig) upsertUserHistory(req CreateUserRequest) error {
-	req.Name = strings.TrimSpace(req.Name)
-	if req.Name == "" {
-		return fmt.Errorf("name is required")
-	}
+	cleanName := strings.TrimSpace(req.Name)
+	hasUUID := strings.TrimSpace(req.UUID) != ""
 
 	return a.DB.Transaction(func(tx *gorm.DB) error {
 		var user UserModel
-		if err := tx.Where("name = ?", req.Name).First(&user).Error; err != nil {
-			if err == gorm.ErrRecordNotFound {
-				user = UserModel{UserUUID: uuid.New(), Name: req.Name}
-				if err := tx.Create(&user).Error; err != nil {
+		var err error
+
+		if hasUUID {
+			uid, parseErr := uuid.Parse(req.UUID)
+			if parseErr != nil {
+				return fmt.Errorf("invalid uuid: %w", parseErr)
+			}
+			err = tx.First(&user, "user_uuid = ?", uid).Error
+			if err != nil {
+				if err == gorm.ErrRecordNotFound {
+					// create with client-provided UUID
+					if cleanName == "" {
+						return fmt.Errorf("name is required when creating a user")
+					}
+					user = UserModel{UserUUID: uid, Name: cleanName}
+					if err := tx.Create(&user).Error; err != nil {
+						return err
+					}
+				} else {
 					return err
 				}
 			} else {
-				return err
+				// update name if provided
+				if cleanName != "" && user.Name != cleanName {
+					user.Name = cleanName
+					if err := tx.Save(&user).Error; err != nil {
+						return err
+					}
+				}
 			}
 		} else {
-			user.Name = req.Name
-			if err := tx.Save(&user).Error; err != nil {
-				return err
+			// legacy path: upsert by name
+			if cleanName == "" {
+				return fmt.Errorf("name is required")
+			}
+			err = tx.Where("name = ?", cleanName).First(&user).Error
+			if err != nil {
+				if err == gorm.ErrRecordNotFound {
+					user = UserModel{UserUUID: uuid.New(), Name: cleanName}
+					if err := tx.Create(&user).Error; err != nil {
+						return err
+					}
+				} else {
+					return err
+				}
+			} else {
+				if user.Name != cleanName {
+					user.Name = cleanName
+					if err := tx.Save(&user).Error; err != nil {
+						return err
+					}
+				}
 			}
 		}
 
+		// Append history snapshot
 		h := HistoryModel{
 			HistoryUUID:       uuid.New(),
 			UserUUID:          user.UserUUID,
@@ -207,11 +258,19 @@ func (a *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return the user's UUID (by name)
+	// Return the user's UUID. We must read it by UUID (if provided) or by name.
 	var user UserModel
-	if err := a.DB.Where("name = ?", strings.TrimSpace(req.Name)).First(&user).Error; err != nil {
-		httpError(w, http.StatusInternalServerError, "db error")
-		return
+	if strings.TrimSpace(req.UUID) != "" {
+		uid, _ := uuid.Parse(req.UUID)
+		if err := a.DB.First(&user, "user_uuid = ?", uid).Error; err != nil {
+			httpError(w, http.StatusInternalServerError, "db error")
+			return
+		}
+	} else {
+		if err := a.DB.Where("name = ?", strings.TrimSpace(req.Name)).First(&user).Error; err != nil {
+			httpError(w, http.StatusInternalServerError, "db error")
+			return
+		}
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"uuid": user.UserUUID})
 }
@@ -306,7 +365,6 @@ func (a *apiConfig) handlerSync(w http.ResponseWriter, r *http.Request) {
 
 	synced, failed := 0, 0
 	for _, it := range batch.Items {
-		// Support create/update user queue items
 		if it.Type != "createUser" && it.Type != "updateUser" {
 			failed++
 			continue

@@ -93,7 +93,7 @@ func main() {
 
 	// Connect DB
 	gdb, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{
-		Logger:                                   logger.Default.LogMode(logger.Warn),
+		Logger:                                   logger.Default.LogMode(logger.Silent), // or logger.Error
 		DisableForeignKeyConstraintWhenMigrating: true,
 	})
 	if err != nil {

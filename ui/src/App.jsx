@@ -1,5 +1,5 @@
 // src/App.jsx
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { put } from './lib/idb.js'
 import { enqueue } from './lib/queue.js'
 import { useSync } from './context/SyncContext.jsx'
@@ -17,6 +17,7 @@ export default function App() {
     name: '', age: '', weight: '', height: '', medical_conditions: '',
   })
 
+  // ✅ keep form in sync whenever user changes
   useEffect(() => {
     if (!user) return
     setForm({
@@ -26,7 +27,7 @@ export default function App() {
       height: user.height || '',
       medical_conditions: (user.medical_conditions || []).join(', '),
     })
-  }, []) // mount only
+  }, [user])
 
   const handleChange = (e) =>
     setForm((f) => ({ ...f, [e.target.name]: e.target.value }))
@@ -71,8 +72,12 @@ export default function App() {
     setOpen(false)
   }
 
-  // Auto-send context to agent on mount + any localStorage change
+  // ✅ prevent duplicate agent calls in dev (StrictMode)
+  const didInit = useRef(false)
   useEffect(() => {
+    if (didInit.current) return
+    didInit.current = true
+
     sendPatientToAgent()
     const onStorage = (e) => {
       if (e.key === Storage.K.user || e.key === Storage.K.patient) {
@@ -165,18 +170,25 @@ export default function App() {
 /* ---------- Inline Status Card ---------- */
 
 function StatusInline({ online, syncing, lastSync }) {
-  const label = online ? 'Online' : 'Offline'
+  const safeDate =
+    lastSync && !Number.isNaN(new Date(lastSync).getTime())
+      ? new Date(lastSync).toLocaleString()
+      : null;
+
   const msg = online
-    ? (lastSync ? `Last synced: ${new Date(lastSync).toLocaleString()}` : (syncing ? 'Syncing…' : 'Waiting to sync…'))
-    : 'Not syncing (offline)'
+    ? (safeDate ? `Last synced: ${safeDate}` : (syncing ? 'Syncing…' : 'Waiting to sync…'))
+    : 'Not syncing (offline)';
 
   return (
     <div className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-zinc-100/40 px-3 py-1.5 dark:border-zinc-800 dark:bg-zinc-900/60">
       <StatusPill online={online} syncing={syncing} />
-      <span className="hidden sm:block text-sm text-zinc-700 dark:text-zinc-300">{msg}</span>
+      <span className="hidden sm:block text-sm text-zinc-700 dark:text-zinc-300">
+        {msg}
+      </span>
     </div>
-  )
+  );
 }
+
 
 /* ---------- Console ---------- */
 
@@ -205,7 +217,7 @@ function AIConsole() {
       <h2 className="mb-4 text-base font-semibold">AI Console</h2>
 
       <div className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
-        {/* Chat list - user right, assistant left */}
+        {/* Chat list */}
         <div className="mb-3 max-h-[48vh] space-y-3 overflow-auto pr-1">
           {messages.length === 0 && (
             <div className="text-sm text-zinc-500 dark:text-zinc-400">No messages yet.</div>

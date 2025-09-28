@@ -1,6 +1,8 @@
+// src/context/SyncContext.jsx
 import { createContext, useContext, useEffect, useState } from 'react';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { trySync } from '../lib/sync';
+import { Storage } from '../lib/storage';
 
 const SyncCtx = createContext({
   online: false,
@@ -12,19 +14,22 @@ const SyncCtx = createContext({
 export function SyncProvider({ children }) {
   const online = useOnlineStatus();
   const [syncing, setSyncing] = useState(false);
-  const [lastSync, setLastSync] = useState(localStorage.getItem('hh:lastSync'));
+  // ✅ Read the parsed value via Storage helper (not raw localStorage)
+  const [lastSync, setLastSync] = useState(Storage.getLastSync());
 
   async function forceSync() {
     if (!online || syncing) return;
     setSyncing(true);
     const res = await trySync();
     setSyncing(false);
-    const ls = localStorage.getItem('hh:lastSync');
+
+    // ✅ Re-read via Storage helper to avoid Invalid Date
+    const ls = Storage.getLastSync();
     if (ls) setLastSync(ls);
     return res;
   }
 
-  // 🔔 Listen for service worker background sync trigger
+  // 🔔 Listen for background sync trigger from the SW (optional)
   useEffect(() => {
     const h = () => forceSync();
     window.addEventListener('hh-sync', h);

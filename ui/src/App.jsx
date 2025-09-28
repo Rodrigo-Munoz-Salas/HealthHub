@@ -1,6 +1,6 @@
 // src/App.jsx
-import React, { useEffect, useState } from 'react'
-import { put } from './lib/idb.js'
+import React, { useEffect, useState, useRef } from 'react'
+import { put, getAll } from './lib/idb.js'
 import { enqueue } from './lib/queue.js'
 import { useSync } from './context/SyncContext.jsx'
 import { Storage } from './lib/storage.js'
@@ -10,6 +10,7 @@ export default function App() {
   const { online, syncing, lastSync, forceSync } = useSync()
 
   const [user, setUser] = useState(() => Storage.getUser() || null)
+  const [allUsers, setAllUsers] = useState([]) // 🔽 options for the dropdown
   const [open, setOpen] = useState(false)
   const [isEdit, setIsEdit] = useState(false)
 
@@ -17,6 +18,16 @@ export default function App() {
     name: '', age: '', weight: '', height: '', medical_conditions: '',
   })
 
+  // Load all users for the dropdown
+  async function refreshUsersList() {
+    const rows = await getAll('users')
+    // Sort by updatedAt desc, fallback to name
+    rows.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0) || (a.name || '').localeCompare(b.name || ''))
+    setAllUsers(rows)
+  }
+  useEffect(() => { refreshUsersList() }, [])
+
+  // Keep form in sync whenever current user changes
   useEffect(() => {
     if (!user) return
     setForm({
@@ -26,7 +37,7 @@ export default function App() {
       height: user.height || '',
       medical_conditions: (user.medical_conditions || []).join(', '),
     })
-  }, []) // mount only
+  }, [user])
 
   const handleChange = (e) =>
     setForm((f) => ({ ...f, [e.target.name]: e.target.value }))
@@ -60,6 +71,7 @@ export default function App() {
       weight: Number(form.weight) || 0,
       height: Number(form.height) || 0,
       medical_conditions: form.medical_conditions.split(',').map(s=>s.trim()).filter(Boolean),
+      updatedAt: new Date().toISOString(),
     }
 
     await put('users', { ...record, id: record.uuid })
@@ -69,24 +81,40 @@ export default function App() {
 
     setUser(record)
     setOpen(false)
+    refreshUsersList()
   }
 
-  // Auto-send context to agent on mount + any localStorage change
+  // Prevent duplicate agent calls in dev (StrictMode)
+  const didInit = useRef(false)
   useEffect(() => {
+    if (didInit.current) return
+    didInit.current = true
+
     sendPatientToAgent()
     const onStorage = (e) => {
       if (e.key === Storage.K.user || e.key === Storage.K.patient) {
         if (e.key === Storage.K.user) setUser(Storage.getUser() || null)
         sendPatientToAgent()
+        refreshUsersList()
       }
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
   }, [])
 
+  // Switch current user from dropdown
+  function selectUserByUUID(uuid) {
+    if (!uuid) return
+    const u = allUsers.find(x => x.uuid === uuid)
+    if (!u) return
+    Storage.setUser(u)
+    setUser(u)
+    sendPatientToAgent()
+  }
+
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-      {/* Header with inline Status card + Create User */}
+      {/* Header */}
       <header className="sticky top-0 z-20 border-b border-zinc-200/60 bg-white/80 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/70">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3">
           <div className="flex items-center gap-3">
@@ -105,18 +133,37 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main content: User card then Console (both full width) */}
+      {/* Main */}
       <main className="mx-auto max-w-6xl px-5 py-6 space-y-6">
         <Card>
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
             <h3 className="text-sm font-semibold">User Details</h3>
-            <button
-              onClick={openEdit}
-              className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
-            >
-              Update
-            </button>
+
+            {/* 🔽 Select user dropdown */}
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-zinc-500">Select user</label>
+              <select
+                value={user?.uuid || ''}
+                onChange={(e) => selectUserByUUID(e.target.value)}
+                className="rounded-lg border border-zinc-300 bg-white px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+              >
+                <option value="" disabled>Select…</option>
+                {allUsers.map(u => (
+                  <option key={u.uuid} value={u.uuid}>
+                    {u.name || 'Unnamed'}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                onClick={openEdit}
+                className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+              >
+                Update
+              </button>
+            </div>
           </div>
+
           <UserDetailsCard user={user} />
         </Card>
 
@@ -165,9 +212,13 @@ export default function App() {
 /* ---------- Inline Status Card ---------- */
 
 function StatusInline({ online, syncing, lastSync }) {
-  const label = online ? 'Online' : 'Offline'
+  const safeDate =
+    lastSync && !Number.isNaN(new Date(lastSync).getTime())
+      ? new Date(lastSync).toLocaleString()
+      : null;
+
   const msg = online
-    ? (lastSync ? `Last synced: ${new Date(lastSync).toLocaleString()}` : (syncing ? 'Syncing…' : 'Waiting to sync…'))
+    ? (safeDate ? `Last synced: ${safeDate}` : (syncing ? 'Syncing…' : 'Waiting to sync…'))
     : 'Not syncing (offline)'
 
   return (
@@ -178,7 +229,7 @@ function StatusInline({ online, syncing, lastSync }) {
   )
 }
 
-/* ---------- Console ---------- */
+/* ---------- Console (same as before) ---------- */
 
 function AIConsole() {
   const [input, setInput] = React.useState('')
@@ -190,7 +241,6 @@ function AIConsole() {
     setMessages((m) => [...m, { role: 'user', content: text, ts: Date.now() }])
     setInput('')
     try {
-      // TODO connect to python chat endpoint
       const data = { reply: 'Agent reply placeholder.' }
       setTimeout(() => {
         setMessages((m) => [...m, { role: 'assistant', content: data.reply, ts: Date.now() }])
@@ -203,9 +253,7 @@ function AIConsole() {
   return (
     <Card>
       <h2 className="mb-4 text-base font-semibold">AI Console</h2>
-
       <div className="rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
-        {/* Chat list - user right, assistant left */}
         <div className="mb-3 max-h-[48vh] space-y-3 overflow-auto pr-1">
           {messages.length === 0 && (
             <div className="text-sm text-zinc-500 dark:text-zinc-400">No messages yet.</div>
@@ -225,8 +273,6 @@ function AIConsole() {
             </div>
           ))}
         </div>
-
-        {/* Composer */}
         <div className="grid gap-3 md:grid-cols-[1fr_auto]">
           <input
             className="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm outline-none hover:border-zinc-400 focus:border-blue-500 dark:border-zinc-700 dark:bg-zinc-950"
@@ -242,7 +288,6 @@ function AIConsole() {
             Send
           </button>
         </div>
-
         <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
           Patient context is sent automatically from local storage.
         </p>
@@ -251,7 +296,7 @@ function AIConsole() {
   )
 }
 
-/* ---------- UI Primitives ---------- */
+/* ---------- UI primitives ---------- */
 
 function Card({ children, className = '' }) {
   return (

@@ -1,16 +1,11 @@
-# --- core service (works today) ---
 fastapi==0.112.1
-uvicorn[standard]==0.30.6
+uvicorn==0.30.6
 pydantic>=2.0.0
 requests>=2.31.0
 
-# --- optional ML stack (ENABLE LATER, see notes) ---
-# numpy>=1.24.3
-# torch>=2.2.0
-# transformers>=4.36.0
-# sentence-transformers>=2.2.2
-# faiss-cpu>=1.7.4
-
-# DO NOT INSTALL THESE FOR NOW (pulls old 'future' and breaks on Py3.10):
-# raganything
-# lightrag
+# Core ML bits your friend uses
+torch>=2.2.0
+transformers>=4.36.0
+sentence-transformers>=2.2.2
+numpy>=1.24.3
+faiss-cpu>=1.7.4

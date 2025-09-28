@@ -4,13 +4,13 @@ import { put, getAll } from './lib/idb.js'
 import { enqueue } from './lib/queue.js'
 import { useSync } from './context/SyncContext.jsx'
 import { Storage } from './lib/storage.js'
-import { sendPatientToAgent } from './lib/agentBridge.js'
+import { sendPatientToAgent, sendChatToAgent } from './lib/agentBridge.js' // ✅
 
 export default function App() {
   const { online, syncing, lastSync, forceSync } = useSync()
 
   const [user, setUser] = useState(() => Storage.getUser() || null)
-  const [allUsers, setAllUsers] = useState([]) // 🔽 options for the dropdown
+  const [allUsers, setAllUsers] = useState([])
   const [open, setOpen] = useState(false)
   const [isEdit, setIsEdit] = useState(false)
 
@@ -18,16 +18,13 @@ export default function App() {
     name: '', age: '', weight: '', height: '', medical_conditions: '',
   })
 
-  // Load all users for the dropdown
   async function refreshUsersList() {
     const rows = await getAll('users')
-    // Sort by updatedAt desc, fallback to name
     rows.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0) || (a.name || '').localeCompare(b.name || ''))
     setAllUsers(rows)
   }
   useEffect(() => { refreshUsersList() }, [])
 
-  // Keep form in sync whenever current user changes
   useEffect(() => {
     if (!user) return
     setForm({
@@ -82,9 +79,9 @@ export default function App() {
     setUser(record)
     setOpen(false)
     refreshUsersList()
+    sendPatientToAgent()
   }
 
-  // Prevent duplicate agent calls in dev (StrictMode)
   const didInit = useRef(false)
   useEffect(() => {
     if (didInit.current) return
@@ -102,7 +99,6 @@ export default function App() {
     return () => window.removeEventListener('storage', onStorage)
   }, [])
 
-  // Switch current user from dropdown
   function selectUserByUUID(uuid) {
     if (!uuid) return
     const u = allUsers.find(x => x.uuid === uuid)
@@ -114,7 +110,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-      {/* Header */}
       <header className="sticky top-0 z-20 border-b border-zinc-200/60 bg-white/80 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/70">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3">
           <div className="flex items-center gap-3">
@@ -133,13 +128,10 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main */}
       <main className="mx-auto max-w-6xl px-5 py-6 space-y-6">
         <Card>
           <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
             <h3 className="text-sm font-semibold">User Details</h3>
-
-            {/* 🔽 Select user dropdown */}
             <div className="flex items-center gap-2">
               <label className="text-xs text-zinc-500">Select user</label>
               <select
@@ -154,7 +146,6 @@ export default function App() {
                   </option>
                 ))}
               </select>
-
               <button
                 onClick={openEdit}
                 className="rounded-lg border border-zinc-300 px-2.5 py-1 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
@@ -163,14 +154,12 @@ export default function App() {
               </button>
             </div>
           </div>
-
           <UserDetailsCard user={user} />
         </Card>
 
         <AIConsole />
       </main>
 
-      {/* Create/Update Modal */}
       {open && (
         <Modal onClose={() => setOpen(false)} title={isEdit ? 'Update User' : 'Create User'}>
           <form onSubmit={saveUser} className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -209,8 +198,6 @@ export default function App() {
   )
 }
 
-/* ---------- Inline Status Card ---------- */
-
 function StatusInline({ online, syncing, lastSync }) {
   const safeDate =
     lastSync && !Number.isNaN(new Date(lastSync).getTime())
@@ -229,8 +216,7 @@ function StatusInline({ online, syncing, lastSync }) {
   )
 }
 
-/* ---------- Console (same as before) ---------- */
-
+/* ---------- Console wired to the agent ---------- */
 function AIConsole() {
   const [input, setInput] = React.useState('')
   const [messages, setMessages] = React.useState([])
@@ -241,10 +227,9 @@ function AIConsole() {
     setMessages((m) => [...m, { role: 'user', content: text, ts: Date.now() }])
     setInput('')
     try {
-      const data = { reply: 'Agent reply placeholder.' }
-      setTimeout(() => {
-        setMessages((m) => [...m, { role: 'assistant', content: data.reply, ts: Date.now() }])
-      }, 120)
+      const data = await sendChatToAgent(text)     // ✅ talk to the agent
+      const reply = data?.reply || 'No reply.'
+      setMessages((m) => [...m, { role: 'assistant', content: reply, ts: Date.now() }])
     } catch {
       setMessages((m) => [...m, { role: 'assistant', content: 'Failed to reach agent.', ts: Date.now() }])
     }
@@ -296,8 +281,7 @@ function AIConsole() {
   )
 }
 
-/* ---------- UI primitives ---------- */
-
+/* ---------- UI primitives (unchanged) ---------- */
 function Card({ children, className = '' }) {
   return (
     <div className={`rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${className}`}>

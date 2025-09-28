@@ -1,89 +1,16 @@
-# Core FastAPI and web framework dependencies
+# --- core service (works today) ---
 fastapi==0.112.1
-uvicorn==0.30.6
+uvicorn[standard]==0.30.6
 pydantic>=2.0.0
-
-# HTTP client for RAG-Anything integration
 requests>=2.31.0
 
-# Machine Learning and AI dependencies
-torch>=2.2.0
-transformers>=4.36.0
-sentence-transformers>=2.2.2
-numpy>=1.24.3
+# --- optional ML stack (ENABLE LATER, see notes) ---
+# numpy>=1.24.3
+# torch>=2.2.0
+# transformers>=4.36.0
+# sentence-transformers>=2.2.2
+# faiss-cpu>=1.7.4
 
-# Vector database and search
-faiss-cpu>=1.7.4
-
-# RAG-Anything and LightRAG dependencies
-raganything
-lightrag
-
-# Google ADK dependencies (if using Google Assistant Development Kit)
-# Note: These may need to be installed separately or may not be available on PyPI
-# google-adk  # Uncomment if available
-
-# LangChain dependencies for chat and memory
-langchain>=0.1.0
-langchain-core>=0.1.0
-
-# Additional utilities
-pathlib2>=2.3.7; python_version < "3.4"
-typing-extensions>=4.0.0
-
-# Development and testing dependencies
-pytest>=7.0.0
-pytest-asyncio>=0.21.0
-
-# Optional: For better performance on Apple Silicon Macs
-# torch-audio>=2.2.0  # Uncomment if needed for audio processing
-# torch-vision>=0.17.0  # Uncomment if needed for image processing
-
-# Optional: For advanced quantization (if using quantized models)
-# bitsandbytes>=0.41.0  # Uncomment if using quantized models
-
-# Optional: For better logging and monitoring
-# loguru>=0.7.0  # Uncomment for enhanced logging
-
-# Optional: For async HTTP requests (alternative to requests)
-# httpx>=0.24.0  # Uncomment if using async HTTP client
-
-# Optional: For data validation and serialization
-# marshmallow>=3.20.0  # Uncomment if using marshmallow for data validation
-
-# Optional: For configuration management
-# python-dotenv>=1.0.0  # Uncomment if using .env files for configuration
-
-# Optional: For database operations (if needed)
-# sqlalchemy>=2.0.0  # Uncomment if using database
-# alembic>=1.12.0  # Uncomment if using database migrations
-
-# Optional: For caching
-# redis>=4.5.0  # Uncomment if using Redis for caching
-
-# Optional: For metrics and monitoring
-# prometheus-client>=0.17.0  # Uncomment if using Prometheus metrics
-
-# Optional: For API documentation
-# swagger-ui-bundle>=4.15.0  # Uncomment if using Swagger UI
-
-# Optional: For CORS handling (already included in FastAPI but can be explicit)
-# python-multipart>=0.0.6  # Uncomment if handling file uploads
-
-# Optional: For JWT authentication (if implementing auth)
-# python-jose[cryptography]>=3.3.0  # Uncomment if using JWT
-# passlib[bcrypt]>=1.7.4  # Uncomment if using password hashing
-
-# Optional: For email notifications (if implementing notifications)
-# sendgrid>=6.10.0  # Uncomment if using SendGrid for emails
-# twilio>=8.5.0  # Uncomment if using Twilio for SMS
-
-# Optional: For cloud storage (if using cloud services)
-# boto3>=1.28.0  # Uncomment if using AWS services
-# google-cloud-storage>=2.10.0  # Uncomment if using Google Cloud Storage
-
-# Optional: For local development
-# python-dotenv>=1.0.0  # Uncomment for environment variable management
-# black>=23.0.0  # Uncomment for code formatting
-# flake8>=6.0.0  # Uncomment for linting
-# mypy>=1.5.0  # Uncomment for type checking
+# DO NOT INSTALL THESE FOR NOW (pulls old 'future' and breaks on Py3.10):
+# raganything
+# lightrag

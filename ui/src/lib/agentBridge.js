@@ -13,10 +13,22 @@ export async function sendPatientToAgent() {
     await fetch('/py/agent/patient-intake', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ user: payload.user, patient: payload.patient }),
     });
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e.message };
   }
+}
+
+export async function sendChatToAgent(message) {
+  const user = Storage.getUser() ?? {};
+  const patient = Storage.getPatient() ?? {};
+  const res = await fetch('/py/agent/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: user.uuid, message, patient_info: patient }),
+  });
+  if (!res.ok) throw new Error(`Agent error ${res.status}`);
+  return res.json();
 }

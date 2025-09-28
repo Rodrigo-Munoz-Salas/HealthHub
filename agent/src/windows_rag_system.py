@@ -13,7 +13,13 @@ import logging
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from sentence_transformers import SentenceTransformer
-import faiss
+try:
+    import faiss
+    FAISS_AVAILABLE = True
+except ImportError:
+    print("⚠️ FAISS not available. Install with: pip install faiss-cpu")
+    FAISS_AVAILABLE = False
+    faiss = None
 import os
 import warnings
 import requests
@@ -95,7 +101,7 @@ class WindowsRAGSystem:
     
     def __init__(self, 
                  models_dir: str = "mobile_models", 
-                 data_dir: str = "mobile_rag_ready",
+                 data_dir: str = "../mobile_rag_ready",
                  embedding_model_name: str = "all-MiniLM-L6-v2",
                  rag_anything_url: str = "http://localhost:9999"):
         """
@@ -196,7 +202,8 @@ class WindowsRAGSystem:
                 self.models_dir / "quantized_tinyllama_health",
                 Path("../mobile_models/quantized_tinyllama_health"),
                 Path("../../agent/mobile_models/quantized_tinyllama_health"),
-                Path("mobile_models/quantized_tinyllama_health")
+                Path("mobile_models/quantized_tinyllama_health"),
+                Path("../agent/mobile_models/quantized_tinyllama_health")
             ]
             
             model_path = None
@@ -254,13 +261,36 @@ class WindowsRAGSystem:
             self.llm_tokenizer = None
     
     def _build_vector_index(self):
-        """Build FAISS vector index from health guidelines"""
+        """Load pre-built vector database or build from scratch if not available"""
         try:
+            # First, try to load pre-built vector database
+            vector_db_path = self.data_dir / "vector_database.pkl"
+            if vector_db_path.exists():
+                logger.info("🔄 Loading pre-built vector database...")
+                with open(vector_db_path, 'rb') as f:
+                    vector_data = pickle.load(f)
+                
+                # Extract vector index and document IDs from pre-built database
+                if isinstance(vector_data, dict) and 'index' in vector_data and 'doc_ids' in vector_data:
+                    self.vector_index = vector_data['index']
+                    self.doc_ids = vector_data['doc_ids']
+                    logger.info(f"✅ Pre-built vector database loaded with {len(self.doc_ids)} documents")
+                    return
+                else:
+                    logger.warning("⚠️ Pre-built vector database format not recognized, building from scratch...")
+            
+            # Check if FAISS is available
+            if not FAISS_AVAILABLE:
+                logger.warning("⚠️ FAISS not available. Vector search will use simple keyword matching.")
+                self.vector_index = None
+                return
+            
+            # Fallback: Build vector index from scratch if pre-built database not available
             if not self.embedding_model or not self.guidelines:
                 logger.warning("⚠️ Cannot build vector index: missing embedding model or guidelines")
                 return
             
-            logger.info("🔄 Building vector index...")
+            logger.info("🔄 Building vector index from scratch...")
             
             # Prepare documents
             documents = []
@@ -341,7 +371,8 @@ class WindowsRAGSystem:
     def _vector_search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
         """Perform vector search on health guidelines"""
         if not self.vector_index or not self.embedding_model:
-            return []
+            # Fallback to simple keyword matching if vector search not available
+            return self._simple_keyword_search(query, k)
         
         try:
             # Generate query embedding
@@ -370,7 +401,39 @@ class WindowsRAGSystem:
             
         except Exception as e:
             logger.error(f"❌ Error in vector search: {e}")
-            return []
+            # Fallback to simple keyword matching
+            return self._simple_keyword_search(query, k)
+    
+    def _simple_keyword_search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
+        """Simple keyword-based search as fallback when vector search is not available"""
+        query_lower = query.lower()
+        results = []
+        
+        for guideline_id, guideline in self.guidelines.items():
+            content = guideline.get("content", "").lower()
+            title = guideline.get("title", "").lower()
+            
+            # Simple keyword matching
+            score = 0
+            for word in query_lower.split():
+                if word in content:
+                    score += 1
+                if word in title:
+                    score += 2  # Title matches are more important
+            
+            if score > 0:
+                results.append({
+                    "guideline_id": guideline_id,
+                    "title": guideline.get("title", "Unknown"),
+                    "content": guideline.get("content", ""),
+                    "score": float(score) / 10.0,  # Normalize score
+                    "emergency_level": guideline.get("emergency_level", "medium"),
+                    "source": "keyword_search"
+                })
+        
+        # Sort by score and return top k results
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return results[:k]
     
     def _hybrid_search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
         """Perform hybrid search combining local vector search and RAG-Anything"""

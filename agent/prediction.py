@@ -1,41 +1,83 @@
-# condition_predictor_adk.py
-import os, json, sqlite3, asyncio, re
-from typing import Any, Dict, List, Optional
+# FastAPI + LangChain chat with in-memory history and an ADK-style predictor tool.
+# No database. Frontend sends strict JSON: { session_id, envelope: { user, chat[] } }
+# Not medical advice. Prototype only.
 
-# ───────────────────────────────
-#  Config
-# ───────────────────────────────
-DEFAULT_DB_PATH = os.getenv("MEDICAL_DB_PATH", "medical.db")
-MAX_EVIDENCE_SYMPTOMS = int(os.getenv("MAX_SYMPTOMS", "5"))  # recent symptoms to include
+import os, json, re, asyncio
+from typing import Dict, List, Literal
 
-# ───────────────────────────────
-#  Safety: basic red-flag scan
-# ───────────────────────────────
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field, field_validator
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.runnables import RunnableLambda
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain.memory import ChatMessageHistory
+from langchain.tools import StructuredTool
+
+# ─────────────────────────────────────────
+# Config
+# ─────────────────────────────────────────
+CHAT_WINDOW_TURNS = 12
+
+# ─────────────────────────────────────────
+# Safety: simple red-flag detector
+# ─────────────────────────────────────────
 RED_PATTERNS = [
     r"not\s+breathing", r"blue\s+lips", r"one[-\s]?sided\s+weakness",
     r"face\s+droop", r"speech\s+difficulty", r"severe\s+chest\s+pain",
     r"radiating\s+(left\s+)?arm", r"faint(ing)?", r"anaphylaxis",
     r"unconscious", r"cannot\s+wake", r"seizure\s*(lasting|>\s*5)"
 ]
+
 def has_red_flags(text: str) -> bool:
     t = (text or "").lower()
     return any(re.search(p, t) for p in RED_PATTERNS)
 
-# ───────────────────────────────
-#  JSON schema validation
-# ───────────────────────────────
+# ─────────────────────────────────────────
+# Local LLM client (plug your model here)
+# Expect .generate(system, user, temperature, max_tokens) -> str
+# ─────────────────────────────────────────
+class LocalLLMClient:
+    def __init__(self, model):
+        self.model = model
+
+    async def complete(self, system: str, user: str, temperature: float = 0.2, max_tokens: int = 600) -> str:
+        def _run():
+            return self.model.generate(system=system, user=user, temperature=temperature, max_tokens=max_tokens)
+        return await asyncio.to_thread(_run)
+
+# Demo stub model — replace with your real local model
+class MyChatModel:
+    def generate(self, system, user, temperature, max_tokens):
+        return "Thanks for sharing. When did this start, how severe is it (0–10), and what makes it better or worse?\n\nNot medical advice."
+
+llm_client = LocalLLMClient(MyChatModel())
+
+def make_local_llm_runnable(client: LocalLLMClient):
+    async def _call(inputs: dict):
+        system = inputs["system"]
+        user = inputs["user"]
+        text = await client.complete(system=system, user=user, temperature=0.2, max_tokens=600)
+        return {"output": text}
+    return RunnableLambda(_call)
+
+lc_llm = make_local_llm_runnable(llm_client)
+
+# ─────────────────────────────────────────
+# Predictor JSON contract (strict)
+# ─────────────────────────────────────────
 REQUIRED_KEYS = {"triage_level","top_conditions","rationale","citations","missing_critical_info","disclaimer"}
 VALID_TRIAGE = {"red","yellow","green"}
 
-def validate_prediction_json(raw: str) -> Dict[str, Any]:
+def validate_prediction_json(raw: str) -> Dict:
     obj = json.loads(raw)
     if not REQUIRED_KEYS.issubset(obj.keys()):
         raise ValueError(f"Missing required keys. Got: {list(obj.keys())}")
     if obj["triage_level"] not in VALID_TRIAGE:
         raise ValueError("Invalid triage_level")
-    if not isinstance(obj["top_conditions"], list) or not obj["top_conditions"]:
+    tcs = obj["top_conditions"]
+    if not isinstance(tcs, list) or not tcs:
         raise ValueError("top_conditions must be a non-empty list")
-    for c in obj["top_conditions"]:
+    for c in tcs:
         if not {"code","name","confidence"}.issubset(c.keys()):
             raise ValueError("Each condition must include code, name, confidence")
         cf = float(c["confidence"])
@@ -43,198 +85,229 @@ def validate_prediction_json(raw: str) -> Dict[str, Any]:
             raise ValueError("confidence must be in [0,1]")
     return obj
 
-# ───────────────────────────────
-#  Local DB helpers
-# ───────────────────────────────
-class LocalDB:
-    def __init__(self, db_path: str = DEFAULT_DB_PATH):
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
+# ─────────────────────────────────────────
+# Pydantic models (strict, no Optional)
+# Frontend payload:
+# {
+#   "session_id": "s1",
+#   "envelope": {
+#     "user": { "name": "Malik", "age": 21, "weight": 185, "height": 180, "conditions": ["Asthma"] },
+#     "chat": [{ "role": "user", "content": "..." }]
+#   }
+# }
+# ─────────────────────────────────────────
+Role = Literal["user", "assistant", "system"]
 
-    def get_profile(self, user_id: str) -> Dict[str, Any]:
-        row = self.conn.execute(
-            """SELECT user_id, age, sex, weight_kg, height_cm, allergies, chronic_conditions, meds
-               FROM users WHERE user_id = ?""",
-            (user_id,)
-        ).fetchone()
-        return dict(row) if row else {}
+class ChatTurn(BaseModel):
+    role: Role
+    content: str = Field(..., min_length=1)
 
-    def get_recent_symptoms(self, user_id: str, limit: int = MAX_EVIDENCE_SYMPTOMS) -> List[Dict[str, Any]]:
-        rows = self.conn.execute(
-            """SELECT ts, text, coded
-               FROM symptoms
-               WHERE user_id = ?
-               ORDER BY ts DESC
-               LIMIT ?""",
-            (user_id, limit)
-        ).fetchall()
-        return [dict(r) for r in rows]
+class FrontendUser(BaseModel):
+    name: str = Field(..., min_length=1)
+    age: int = Field(..., ge=0, le=120)
+    weight: float = Field(..., ge=0)
+    height: float = Field(..., ge=0)
+    conditions: List[str]  # can be empty list, but must be present
 
-# ───────────────────────────────
-#  Your LLM client (choose one)
-# ───────────────────────────────
-class AbstractLLMClient:
-    """Implement .complete(system: str, user: str, temperature: float, max_tokens: int) -> str"""
-    async def complete(self, system: str, user: str, temperature: float = 0.1, max_tokens: int = 800) -> str:
-        raise NotImplementedError
+class ChatEnvelope(BaseModel):
+    user: FrontendUser
+    chat: List[ChatTurn]
 
-class LocalHTTPClient(AbstractLLMClient):
-    """
-    Example: call your own inference server (FastAPI/Flask/etc.)
-    Expected JSON response: {"text": "<model_output_string>"}
-    """
-    def __init__(self, base_url: str = "http://localhost:8000/complete"):
-        self.base_url = base_url
+    @field_validator("chat")
+    @classmethod
+    def chat_must_have_user_message(cls, v: List[ChatTurn]):
+        if not v:
+            raise ValueError("chat must contain at least one message")
+        if not any(t.role == "user" for t in v):
+            raise ValueError("chat must include at least one 'user' message")
+        return v
 
-    async def complete(self, system: str, user: str, temperature: float = 0.1, max_tokens: int = 800) -> str:
-        import requests  # sync; wrap in thread for async
-        def _run():
-            payload = {
-                "system": system,
-                "user": user,
-                "temperature": temperature,
-                "max_tokens": max_tokens
-            }
-            r = requests.post(self.base_url, json=payload, timeout=60)
-            r.raise_for_status()
-            data = r.json()
-            return data.get("text", "")
-        return await asyncio.to_thread(_run)
+class ChatReq(BaseModel):
+    session_id: str = "default"
+    envelope: ChatEnvelope
 
-class InProcessClient(AbstractLLMClient):
-    """
-    Example: call your model directly (e.g., llama.cpp, vLLM, or a local generate() function).
-    Replace the pass with your own generation call.
-    """
-    def __init__(self, model):
-        self.model = model  # your object with .generate(system, user, temperature, max_tokens)
+# ─────────────────────────────────────────
+# Predictor prompting (ADK tool)
+# ─────────────────────────────────────────
+PREDICT_SYSTEM = (
+    "You are a cautious clinical reasoning assistant for prototyping only. "
+    "You DO NOT give medical advice or diagnoses. "
+    "Estimate LIKELY conditions from the patient's profile and current input. "
+    "Output STRICT JSON with keys: triage_level, top_conditions, rationale, citations, missing_critical_info, disclaimer. "
+    "triage_level ∈ {red,yellow,green}. "
+    "top_conditions is an array of {code, name, confidence}. "
+    "If red-flag symptoms are present, triage_level MUST be 'red'. "
+    "Keep rationale ≤2 sentences. Citations may be ['local_record']."
+)
 
-    async def complete(self, system: str, user: str, temperature: float = 0.1, max_tokens: int = 800) -> str:
-        def _run():
-            # Must return a string that is STRICT JSON per the schema
-            return self.model.generate(system=system, user=user, temperature=temperature, max_tokens=max_tokens)
-        return await asyncio.to_thread(_run)
+def build_predict_user(profile: Dict, current_input: str) -> str:
+    return (
+        f"PROFILE_JSON:\n{json.dumps(profile, ensure_ascii=False)}\n\n"
+        f"CURRENT_INPUT:\n{current_input}\n\n"
+        "Return ONLY the JSON object described above."
+    )
 
-# ───────────────────────────────
-#  The ADK Tool
-# ───────────────────────────────
-class ConditionPredictorADK:
-    """
-    ADK tool:
-      - Reads user profile + recent symptoms from local DB
-      - Prompts YOUR LLM to estimate likely conditions (strict JSON)
-      - Writes to state via output_key
-    """
-    name = "condition_predictor"
-    description = "Predicts likely medical conditions from local medical records + current symptoms via local LLM."
-    output_key = "last_condition_estimate"
+class PredictArgs(BaseModel):
+    user_id: str
+    current_input: str
+    profile: Dict  # strict: must be present
 
-    def __init__(self, llm_client: AbstractLLMClient, db_path: str = DEFAULT_DB_PATH, model_name: str = "local-llm"):
-        self.llm = llm_client
-        self.db = LocalDB(db_path=db_path)
-        self.model_name = model_name
+async def predictor_tool_fn(user_id: str, current_input: str, profile: Dict) -> str:
+    # pre-scan red flags from current input
+    red_prefilter = has_red_flags(current_input)
 
-    def _build_prompt(self, profile: Dict[str, Any], recent_symptoms: List[Dict[str, Any]], live_query: Optional[str]) -> Dict[str, str]:
-        system = (
-            "You are a cautious clinical reasoning assistant for prototyping only. "
-            "You DO NOT give medical advice or diagnoses. "
-            "Estimate LIKELY conditions based on the patient's profile and symptoms. "
-            "Output STRICT JSON with keys: "
-            "triage_level, top_conditions, rationale, citations, missing_critical_info, disclaimer. "
-            "triage_level ∈ {red,yellow,green}. "
-            "top_conditions is an array of objects with fields {code, name, confidence}. "
-            "If red-flag symptoms are present, triage_level MUST be 'red'. "
-            "Keep rationale ≤2 sentences. Citations can be simple placeholders like ['local_record']."
-        )
+    # build prompt
+    user_prompt = build_predict_user(profile, current_input)
 
-        sym_lines = []
-        for r in recent_symptoms:
-            line = f"- {r.get('ts','')} : {r.get('text','')}"
-            if r.get('coded'):
-                line += f" (coded: {r['coded']})"
-            sym_lines.append(line)
-        sym_block = "\n".join(sym_lines) if sym_lines else "(none on record)"
+    # call local model; expect strict JSON
+    raw = await llm_client.complete(system=PREDICT_SYSTEM, user=user_prompt, temperature=0.1, max_tokens=700)
 
-        user_block = (
-            f"PROFILE:\n{json.dumps(profile, ensure_ascii=False)}\n\n"
-            f"RECENT_SYMPTOMS:\n{sym_block}\n\n"
-            f"CURRENT_INPUT:\n{live_query or ''}\n\n"
-            "Return ONLY a JSON object with the exact keys described."
-        )
-        return {"system": system, "user": user_block}
-
-    def _render_text(self, obj: Dict[str, Any]) -> str:
-        lines = [f"Triage: **{obj['triage_level'].upper()}**", "Most likely:"]
-        for i, c in enumerate(obj["top_conditions"][:5], 1):
-            try:
-                conf = float(c["confidence"])
-            except Exception:
-                conf = 0.0
-            lines.append(f"{i}. {c['name']} ({c['code']}) — p≈{conf:.2f}")
-        if obj.get("citations"):
-            lines.append(f"Citations: {', '.join(obj['citations'])}")
-        lines.append(obj.get("disclaimer","Prototype only. Not medical advice."))
-        return "\n".join(lines)
-
-    async def __call__(self, *, query: str, user_id: str, state: Dict[str, Any]) -> Dict[str, Any]:
-        # 1) Pull profile + recent symptoms from local DB
-        profile = self.db.get_profile(user_id) or {}
-        recent_symptoms = self.db.get_recent_symptoms(user_id, limit=MAX_EVIDENCE_SYMPTOMS)
-
-        # 2) Pre-scan for red flags across stored + live text
-        combined_text = " ".join([query] + [s.get("text","") for s in recent_symptoms])
-        red_prefilter = has_red_flags(combined_text)
-
-        # 3) Prompt your LLM
-        prompt = self._build_prompt(profile, recent_symptoms, query)
-        raw = await self.llm.complete(system=prompt["system"], user=prompt["user"], temperature=0.1, max_tokens=700)
-
-        # 4) Validate JSON (fallback safe if invalid)
-        try:
-            obj = validate_prediction_json(raw)
-        except Exception as e:
-            obj = {
-                "triage_level": "red" if red_prefilter else "yellow",
-                "top_conditions": [{"code":"UNSURE","name":"Uncertain","confidence":0.0}],
-                "rationale": f"Model output invalid ({str(e)}). Fallback engaged.",
-                "citations": ["local_record"] if recent_symptoms else [],
-                "missing_critical_info": ["onset_time","duration","severity_scale","associated_symptoms"],
-                "disclaimer": "Prototype only. Not medical advice."
-            }
-
-        # 5) Never down-triage if we pre-detected red flags
-        if red_prefilter and obj.get("triage_level") != "red":
-            obj["triage_level"] = "red"
-
-        # 6) Compose response payload
-        text = self._render_text(obj)
-        result_payload = {
-            "prediction": obj,
-            "input_bundle": {  # JSON extracted from your DB (easy for frontend + next ADK)
-                "profile": profile,
-                "recent_symptoms": recent_symptoms,
-                "current_input": query
-            },
-            "model_info": {
-                "provider": "local",
-                "model_name": self.model_name,
-                "prompt_version": "v1"
-            }
+    # validate or fallback
+    try:
+        obj = validate_prediction_json(raw)
+    except Exception as e:
+        obj = {
+            "triage_level": "red" if red_prefilter else "yellow",
+            "top_conditions": [{"code":"UNSURE","name":"Uncertain","confidence":0.0}],
+            "rationale": f"Model output invalid ({str(e)}). Fallback engaged.",
+            "citations": ["local_record"],
+            "missing_critical_info": ["onset_time","duration","severity_scale","associated_symptoms"],
+            "disclaimer": "Prototype only. Not medical advice."
         }
 
-        # 7) Persist to session for chaining
-        writes = {
-            self.output_key: result_payload,
-            "triage_level": obj["triage_level"],
-            "last_condition_audit": {
-                "used_profile_keys": list(profile.keys()),
-                "symptom_count_used": len(recent_symptoms),
-                "prefilter_red": red_prefilter
-            }
-        }
+    if red_prefilter and obj.get("triage_level") != "red":
+        obj["triage_level"] = "red"
 
-        return {
-            "text": text,          # optional human-friendly rendering
-            "data": result_payload, # machine-friendly JSON for frontend
-            "write_state": writes   # makes it easy for the next ADK to reuse
-        }
+    bundle = {
+        "prediction": obj,
+        "input_bundle": {
+            "profile": profile,
+            "current_input": current_input
+        },
+        "model_info": {"provider":"local","model_name":"my-small-llm","prompt_version":"v1"}
+    }
+    return json.dumps(bundle)
+
+predict_tool = StructuredTool.from_function(
+    coroutine=predictor_tool_fn,
+    name="condition_predictor",
+    description="Estimate likely conditions and triage from profile + current input. Returns strict JSON.",
+    args_schema=PredictArgs,
+)
+
+# ─────────────────────────────────────────
+# Chat chain with in-memory history
+# ─────────────────────────────────────────
+SYSTEM_PROMPT = (
+    "You are a careful, supportive health chat assistant for prototyping only.\n"
+    "CRITICAL RULES:\n"
+    "• You are NOT a doctor and do NOT provide medical advice or diagnoses.\n"
+    "• Be empathetic and concise. Ask focused follow-ups when needed.\n"
+    "• If RED-FLAG symptoms appear (severe chest pain, stroke signs, trouble breathing), advise immediate emergency care.\n"
+    "• End your response with: 'Not medical advice.'"
+)
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", SYSTEM_PROMPT),
+    MessagesPlaceholder("history"),
+    ("human", "{input}")
+])
+
+_histories: Dict[str, ChatMessageHistory] = {}
+
+def get_history(session_id: str) -> ChatMessageHistory:
+    return _histories.setdefault(session_id, ChatMessageHistory())
+
+def _cap_window(hist: ChatMessageHistory, max_turns: int = CHAT_WINDOW_TURNS):
+    msgs = list(hist.messages)
+    if len(msgs) > max_turns:
+        hist.messages = type(hist.messages)(msgs[-max_turns:])
+
+async def _chat_invoke_with_cap(inputs, config):
+    out = await (prompt | lc_llm).ainvoke(inputs, config=config)
+    session_id = (config.get("configurable") or {}).get("session_id", "default")
+    _cap_window(get_history(session_id))
+    return out
+
+chat_with_memory = RunnableWithMessageHistory(
+    RunnableLambda(_chat_invoke_with_cap),
+    get_session_history=get_history,
+    input_messages_key="input",
+    history_messages_key="history"
+)
+
+# ─────────────────────────────────────────
+# Router: chat vs predictor tool
+# ─────────────────────────────────────────
+DIAG_RE = re.compile(r"\b(diagnose|what\s+is\s+this|condition|triage|predict|assessment)\b", re.I)
+
+async def router_fn(inputs: dict):
+    text = inputs["input"]
+    user_id = inputs["user_id"]
+    session_id = inputs.get("session_id", "default")
+    profile_json = inputs["profile"]  # required in our flow
+
+    # emergency check
+    if has_red_flags(text):
+        res = await chat_with_memory.ainvoke({"input": text}, config={"configurable":{"session_id": session_id}})
+        out = res["output"]
+        if "emergency" not in out.lower():
+            out += ("\n\n⚠️ If you’re experiencing severe or worsening symptoms (e.g., severe chest pain, "
+                    "trouble breathing, stroke-like symptoms), please seek emergency care now. Not medical advice.")
+        return {"output": out}
+
+    # ask for assessment → call ADK tool
+    if DIAG_RE.search(text):
+        payload = await predict_tool.ainvoke({
+            "user_id": user_id,
+            "current_input": text,
+            "profile": profile_json
+        })
+        data = json.loads(payload)
+        top = (data["prediction"]["top_conditions"] or [{}])[0]
+        triage = data["prediction"]["triage_level"]
+        conf = float(top.get("confidence", 0.0))
+        summary = (f"Triage: {triage.upper()}\n"
+                   f"Most likely: {top.get('name','?')} ({top.get('code','?')}) p≈{conf:.2f}\n"
+                   f"Not medical advice.")
+        await chat_with_memory.ainvoke({"input": f"[System note] Tool result shared: {summary}"},
+                                       config={"configurable":{"session_id": session_id}})
+        return {"output": summary, "data": data}
+
+    # normal chat
+    return await chat_with_memory.ainvoke({"input": text}, config={"configurable":{"session_id": session_id}})
+
+router = RunnableLambda(router_fn)
+
+# ─────────────────────────────────────────
+# FastAPI
+# ─────────────────────────────────────────
+app = FastAPI()
+
+@app.post("/chat")
+async def chat(req: ChatReq):
+    session_id = req.session_id or "default"
+    # derive a simple user_id (slug) from name; replace with real ID if you have one
+    user_id = re.sub(r"[^a-z0-9_-]+", "-", req.envelope.user.name.strip().lower())
+
+    # build profile dict (strict, no units parsing)
+    profile_json = {
+        "name": req.envelope.user.name,
+        "age": req.envelope.user.age,
+        "weight": req.envelope.user.weight,
+        "height": req.envelope.user.height,
+        "conditions": req.envelope.user.conditions,
+    }
+
+    # use the latest user message
+    last_user_msg = next((t.content for t in reversed(req.envelope.chat) if t.role == "user"), None)
+    if not last_user_msg:
+        raise HTTPException(status_code=400, detail="No user message found in 'chat'.")
+
+    out = await router.ainvoke({
+        "input": last_user_msg,
+        "user_id": user_id,
+        "session_id": session_id,
+        "profile": profile_json
+    })
+    return out

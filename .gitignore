@@ -4,3 +4,4 @@ agent/.env
 agent/.venv
 agent/src/__pycache__/
 venv
+.env

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -18,6 +19,8 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+/* ---------- DB Models ---------- */
+
 type UserModel struct {
 	UserUUID uuid.UUID `gorm:"primaryKey;type:uuid"`
 	Name     string    `gorm:"not null;index"`
@@ -27,7 +30,7 @@ func (UserModel) TableName() string { return "users" }
 
 type HistoryModel struct {
 	HistoryUUID       uuid.UUID `gorm:"primaryKey;type:uuid"`
-	UserUUID          uuid.UUID `gorm:"index;not null;type:uuid"` // FK column (we'll add constraint after migrate)
+	UserUUID          uuid.UUID `gorm:"index;not null;type:uuid"` // FK column
 	Age               int
 	Height            float64
 	Weight            float64
@@ -37,6 +40,8 @@ type HistoryModel struct {
 
 func (HistoryModel) TableName() string { return "history" }
 
+/* ---------- API Payloads ---------- */
+
 type CreateUserRequest struct {
 	Name              string   `json:"name"`
 	Age               int      `json:"age"`
@@ -44,6 +49,7 @@ type CreateUserRequest struct {
 	Height            float64  `json:"height"`
 	MedicalConditions []string `json:"medical_conditions"`
 }
+
 type SyncUsersRequest struct {
 	Users []struct {
 		Name              string   `json:"name"`
@@ -53,6 +59,23 @@ type SyncUsersRequest struct {
 		MedicalConditions []string `json:"medical_conditions"`
 	} `json:"users"`
 }
+
+// UI queue batch -> /api/sync
+type QueueItem struct {
+	ID      string          `json:"id"`
+	Type    string          `json:"type"` // "createUser" | "updateUser"
+	Ts      string          `json:"ts"`
+	Payload json.RawMessage `json:"payload"` // same shape as CreateUserRequest
+}
+type SyncBatchRequest struct {
+	Items []QueueItem `json:"items"`
+}
+type SyncBatchResponse struct {
+	Synced int `json:"synced"`
+	Failed int `json:"failed"`
+}
+
+/* ---------- Server ---------- */
 
 type apiConfig struct{ DB *gorm.DB }
 
@@ -68,7 +91,7 @@ func main() {
 		log.Fatal("DB_URL is not set")
 	}
 
-	// Disable FK creation during AutoMigrate (prevents reverse-FK bug)
+	// Connect DB
 	gdb, err := gorm.Open(postgres.Open(dbURL), &gorm.Config{
 		Logger:                                   logger.Default.LogMode(logger.Warn),
 		DisableForeignKeyConstraintWhenMigrating: true,
@@ -84,12 +107,11 @@ func main() {
 		log.Fatalf("ping: %v", err)
 	}
 
-	// Create/align tables
+	// Migrate
 	if err := gdb.AutoMigrate(&UserModel{}, &HistoryModel{}); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
-
-	// Add the intended FK (history.user_uuid -> users.user_uuid) only if missing
+	// Add FK if missing
 	if err := gdb.Exec(`
 DO $$
 BEGIN
@@ -112,6 +134,7 @@ END$$;
 
 	api := &apiConfig{DB: gdb}
 
+	// Router + CORS
 	r := chi.NewRouter()
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{"http://*", "https://*"},
@@ -120,30 +143,29 @@ END$$;
 		MaxAge:         300,
 	}))
 
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
+	// Routes
+	r.Get("/health", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("ok")) })
 	r.Post("/users", api.handlerCreateUser)
 	r.Get("/users/{uuid}/exists", api.handlerCheckExists)
-	r.Post("/sync/users", api.handlerSyncUsers)
+	r.Post("/sync/users", api.handlerSyncUsers) // legacy/alternate
+	r.Post("/api/sync", api.handlerSync)        // <-- UI queue posts here
 
 	log.Printf("[Go API] listening on :%s", port)
 	log.Println("GORM/Postgres ready")
 	log.Fatal(http.ListenAndServe(":"+port, r))
 }
 
-func (a *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
-	var req CreateUserRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpError(w, http.StatusBadRequest, "invalid json")
-		return
-	}
+/* ---------- Helpers ---------- */
+
+// Reusable upsert + history insert used by multiple handlers.
+func (a *apiConfig) upsertUserHistory(req CreateUserRequest) error {
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
-		httpError(w, http.StatusBadRequest, "name is required")
-		return
+		return fmt.Errorf("name is required")
 	}
 
-	var user UserModel
-	err := a.DB.Transaction(func(tx *gorm.DB) error {
+	return a.DB.Transaction(func(tx *gorm.DB) error {
+		var user UserModel
 		if err := tx.Where("name = ?", req.Name).First(&user).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
 				user = UserModel{UserUUID: uuid.New(), Name: req.Name}
@@ -159,15 +181,35 @@ func (a *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
+
 		h := HistoryModel{
-			HistoryUUID: uuid.New(),
-			UserUUID:    user.UserUUID,
-			Age:         req.Age, Height: req.Height, Weight: req.Weight,
+			HistoryUUID:       uuid.New(),
+			UserUUID:          user.UserUUID,
+			Age:               req.Age,
+			Height:            req.Height,
+			Weight:            req.Weight,
 			MedicalConditions: strings.Join(req.MedicalConditions, ", "),
 		}
 		return tx.Create(&h).Error
 	})
-	if err != nil {
+}
+
+/* ---------- Handlers ---------- */
+
+func (a *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
+	var req CreateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if err := a.upsertUserHistory(req); err != nil {
+		httpError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Return the user's UUID (by name)
+	var user UserModel
+	if err := a.DB.Where("name = ?", strings.TrimSpace(req.Name)).First(&user).Error; err != nil {
 		httpError(w, http.StatusInternalServerError, "db error")
 		return
 	}
@@ -230,9 +272,11 @@ func (a *apiConfig) handlerSyncUsers(w http.ResponseWriter, r *http.Request) {
 			}
 
 			h := HistoryModel{
-				HistoryUUID: uuid.New(),
-				UserUUID:    user.UserUUID,
-				Age:         u.Age, Height: u.Height, Weight: u.Weight,
+				HistoryUUID:       uuid.New(),
+				UserUUID:          user.UserUUID,
+				Age:               u.Age,
+				Height:            u.Height,
+				Weight:            u.Weight,
 				MedicalConditions: strings.Join(u.MedicalConditions, ", "),
 			}
 			if err := tx.Create(&h).Error; err != nil {
@@ -248,6 +292,41 @@ func (a *apiConfig) handlerSyncUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"upserted": total})
 }
+
+func (a *apiConfig) handlerSync(w http.ResponseWriter, r *http.Request) {
+	var batch SyncBatchRequest
+	if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
+		httpError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	if len(batch.Items) == 0 {
+		_ = json.NewEncoder(w).Encode(SyncBatchResponse{Synced: 0, Failed: 0})
+		return
+	}
+
+	synced, failed := 0, 0
+	for _, it := range batch.Items {
+		// Support create/update user queue items
+		if it.Type != "createUser" && it.Type != "updateUser" {
+			failed++
+			continue
+		}
+		var u CreateUserRequest
+		if err := json.Unmarshal(it.Payload, &u); err != nil {
+			failed++
+			continue
+		}
+		if err := a.upsertUserHistory(u); err != nil {
+			failed++
+			continue
+		}
+		synced++
+	}
+
+	_ = json.NewEncoder(w).Encode(SyncBatchResponse{Synced: synced, Failed: failed})
+}
+
+/* ---------- Util ---------- */
 
 func httpError(w http.ResponseWriter, code int, msg string) {
 	w.WriteHeader(code)

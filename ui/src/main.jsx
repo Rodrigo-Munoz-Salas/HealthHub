@@ -2,13 +2,11 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
-import './index.css'
-import { SyncProvider } from './context/SyncContext'   // ✅ add provider
-
-// Tailwind styles (make sure you have index.css imported somewhere)
+import { SyncProvider } from './context/SyncContext'
 import './index.css'
 
-if ('serviceWorker' in navigator) {
+// ✅ Register service worker only in production
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
       .register('/sw.js')

@@ -1,5 +1,5 @@
 // src/lib/idb.js
-const DB_NAME = 'healthhub';
+const DB_NAME = 'healthhub-db';
 const STORE = 'users';
 
 function open() {

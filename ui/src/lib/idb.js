@@ -34,3 +34,27 @@ export async function get(storeName = STORE, id) {
     req.onerror = () => reject(req.error);
   });
 }
+
+// ✅ Get all rows from a store (used for the dropdown)
+export async function getAll(storeName = STORE) {
+  const db = await open();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readonly');
+    const store = tx.objectStore(storeName);
+
+    if ('getAll' in store) {
+      const req = store.getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    } else {
+      const results = [];
+      const cur = store.openCursor();
+      cur.onsuccess = (e) => {
+        const c = e.target.result;
+        if (c) { results.push(c.value); c.continue(); }
+        else resolve(results);
+      };
+      cur.onerror = () => reject(cur.error);
+    }
+  });
+}

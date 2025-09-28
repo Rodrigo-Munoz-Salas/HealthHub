@@ -117,3 +117,4 @@ def test_batch_queries():
 if __name__ == "__main__":
     success = test_batch_queries()
     sys.exit(0 if success else 1)
+

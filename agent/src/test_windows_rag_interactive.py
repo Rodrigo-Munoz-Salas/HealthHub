@@ -132,3 +132,4 @@ def test_interactive_rag():
 if __name__ == "__main__":
     success = test_interactive_rag()
     sys.exit(0 if success else 1)
+

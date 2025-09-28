@@ -24,6 +24,9 @@ import os
 import warnings
 import requests
 
+BASE = Path(__file__).resolve().parent      # agent/src
+ROOT = BASE.parent 
+
 # Suppress warnings for cleaner output
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -99,11 +102,12 @@ class RAGAnythingClient:
 class WindowsRAGSystem:
     """Windows-optimized RAG system with TinyLlama, embeddings, and vector search"""
     
-    def __init__(self, 
-                 models_dir: str = "mobile_models", 
-                 data_dir: str = "../mobile_rag_ready",
-                 embedding_model_name: str = "all-MiniLM-L6-v2",
-                 rag_anything_url: str = "http://localhost:9999"):
+    def __init__(self,
+             models_dir: str | Path = ROOT / "mobile_models",
+             data_dir: str | Path   = ROOT / "mobile_rag_ready",
+             embedding_model_name: str = "all-MiniLM-L6-v2",
+             rag_anything_url: str = "http://localhost:9999"):
+
         """
         Initialize Windows-optimized RAG system with RAG-Anything integration
         
@@ -593,7 +597,7 @@ Emergency: Yes/No. Action: [seek hospital/see doctor]. Include key symptoms if s
                 ai_response = None
                 if self.llm_model is not None:
                     prompt = self._create_rag_prompt(query, vector_results)
-                    ai_response = self._generate_response(prompt, max_length=25)
+                    ai_response = self._generate_response(prompt, max_length=150)
                 
                 response = {
                     "emergency_type": emergency_type,
@@ -615,7 +619,7 @@ Emergency: Yes/No. Action: [seek hospital/see doctor]. Include key symptoms if s
                 ai_response = None
                 if self.llm_model is not None:
                     prompt = self._create_rag_prompt(query, vector_results)
-                    ai_response = self._generate_response(prompt, max_length=25)
+                    ai_response = self._generate_response(prompt, max_length=150)
                 
                 response = {
                     "emergency_type": "general_health",

@@ -1,6 +1,6 @@
 """
-Complete Local RAG System with RAG-Anything Integration
-Includes TinyLlama model, text embeddings, vector database, health guidelines, and RAG-Anything server
+Windows-Optimized RAG-Anything Implementation
+Complete RAG system optimized for Windows with TinyLlama, embeddings, vector database, and RAG-Anything server integration
 """
 
 import json
@@ -11,11 +11,16 @@ from typing import Dict, List, Any, Optional
 import time
 import logging
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModel
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from sentence_transformers import SentenceTransformer
 import faiss
 import os
+import warnings
 import requests
+
+# Suppress warnings for cleaner output
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +75,8 @@ class RAGAnythingClient:
                     "content": item.get("content", ""),
                     "source_id": item.get("source_id", "rag-anything"),
                     "score": item.get("score", 0.0),
-                    "title": item.get("title", "RAG-Anything Result")
+                    "title": item.get("title", "RAG-Anything Result"),
+                    "source": "rag-anything"
                 })
             
             logger.info(f"📚 Retrieved {len(results)} documents from RAG-Anything")
@@ -84,16 +90,16 @@ class RAGAnythingClient:
         """Check if RAG-Anything server is available"""
         return self.available
 
-class LocalHealthRAG:
-    """Complete local RAG system with TinyLlama, embeddings, and vector search"""
+class WindowsRAGSystem:
+    """Windows-optimized RAG system with TinyLlama, embeddings, and vector search"""
     
     def __init__(self, 
-                 models_dir: str = "../mobile_models", 
-                 data_dir: str = "../../mobile_rag_ready",
+                 models_dir: str = "mobile_models", 
+                 data_dir: str = "mobile_rag_ready",
                  embedding_model_name: str = "all-MiniLM-L6-v2",
                  rag_anything_url: str = "http://localhost:9999"):
         """
-        Initialize complete local RAG system with RAG-Anything integration
+        Initialize Windows-optimized RAG system with RAG-Anything integration
         
         Args:
             models_dir: Directory containing TinyLlama model
@@ -112,23 +118,41 @@ class LocalHealthRAG:
         self.vector_index = None
         self.guidelines = {}
         self.emergency_protocols = {}
+        self.doc_ids = []
         
         # Initialize RAG-Anything client
         self.rag_anything_client = RAGAnythingClient(rag_anything_url)
         
+        # Windows-specific optimizations
+        self._setup_windows_optimizations()
+        
         # Load all components
         self._load_health_data()
         self._load_embedding_model()
-        self._load_tinyllama_model()
+        self._load_tinyllama_model_windows()
         self._build_vector_index()
         
-        logger.info("🏥 Local Health RAG System Initialized!")
+        logger.info("🏥 Windows RAG System Initialized!")
         logger.info(f"📚 Guidelines: {len(self.guidelines)}")
         logger.info(f"🚨 Emergency Protocols: {len(self.emergency_protocols)}")
         logger.info(f"🤖 TinyLlama Model: {'Loaded' if self.llm_model is not None else 'Not Available'}")
         logger.info(f"🔍 Embedding Model: {'Loaded' if self.embedding_model is not None else 'Not Available'}")
         logger.info(f"📊 Vector Index: {'Built' if self.vector_index is not None else 'Not Available'}")
         logger.info(f"🌐 RAG-Anything Server: {'Connected' if self.rag_anything_client.is_available() else 'Not Available'}")
+    
+    def _setup_windows_optimizations(self):
+        """Setup Windows-specific optimizations"""
+        # Set environment variables for better Windows compatibility
+        os.environ["TOKENIZERS_PARALLELISM"] = "false"
+        os.environ["OMP_NUM_THREADS"] = "4"
+        
+        # Windows-specific torch settings
+        if torch.cuda.is_available():
+            logger.info("🚀 CUDA available - using GPU acceleration")
+            self.device = "cuda"
+        else:
+            logger.info("💻 Using CPU mode")
+            self.device = "cpu"
     
     def _load_health_data(self):
         """Load health guidelines and emergency protocols"""
@@ -164,8 +188,8 @@ class LocalHealthRAG:
             logger.error(f"❌ Error loading embedding model: {e}")
             self.embedding_model = None
     
-    def _load_tinyllama_model(self):
-        """Load TinyLlama model for local inference (macOS compatible)"""
+    def _load_tinyllama_model_windows(self):
+        """Load TinyLlama model optimized for Windows"""
         try:
             # Find model path
             possible_paths = [
@@ -185,7 +209,7 @@ class LocalHealthRAG:
                 logger.warning("⚠️ TinyLlama model not found, using fallback responses")
                 return
             
-            logger.info("🔄 Loading TinyLlama model (macOS compatible)...")
+            logger.info("🔄 Loading TinyLlama model (Windows optimized)...")
             
             # Load tokenizer
             self.llm_tokenizer = AutoTokenizer.from_pretrained(
@@ -193,23 +217,35 @@ class LocalHealthRAG:
                 trust_remote_code=True
             )
             
-            # Load model without quantization for macOS compatibility
-            self.llm_model = AutoModelForCausalLM.from_pretrained(
-                str(model_path),
-                trust_remote_code=True,
-                dtype=torch.float32,
-                device_map="cpu",
-                low_cpu_mem_usage=True,
-                use_safetensors=True,
-                load_in_8bit=False,
-                load_in_4bit=False
-            )
+            # Windows-optimized model loading
+            if self.device == "cuda":
+                # GPU loading with quantization support
+                self.llm_model = AutoModelForCausalLM.from_pretrained(
+                    str(model_path),
+                    trust_remote_code=True,
+                    torch_dtype=torch.float16,
+                    device_map="auto",
+                    low_cpu_mem_usage=True,
+                    use_safetensors=True
+                )
+            else:
+                # CPU loading without quantization issues
+                self.llm_model = AutoModelForCausalLM.from_pretrained(
+                    str(model_path),
+                    trust_remote_code=True,
+                    torch_dtype=torch.float32,
+                    device_map="cpu",
+                    low_cpu_mem_usage=True,
+                    use_safetensors=True,
+                    load_in_8bit=False,
+                    load_in_4bit=False
+                )
             
             # Set pad token
             if self.llm_tokenizer.pad_token is None:
                 self.llm_tokenizer.pad_token = self.llm_tokenizer.eos_token
             
-            logger.info("✅ TinyLlama model loaded successfully (CPU mode)")
+            logger.info(f"✅ TinyLlama model loaded successfully ({self.device} mode)")
             
         except Exception as e:
             logger.warning(f"⚠️ TinyLlama model loading failed: {e}")
@@ -274,6 +310,10 @@ class LocalHealthRAG:
                 max_length=512
             )
             
+            # Move to device
+            if self.device == "cuda":
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            
             # Generate response
             with torch.no_grad():
                 outputs = self.llm_model.generate(
@@ -282,7 +322,8 @@ class LocalHealthRAG:
                     temperature=0.7,
                     do_sample=True,
                     pad_token_id=self.llm_tokenizer.eos_token_id,
-                    eos_token_id=self.llm_tokenizer.eos_token_id
+                    eos_token_id=self.llm_tokenizer.eos_token_id,
+                    repetition_penalty=1.1
                 )
             
             # Decode response
@@ -402,8 +443,35 @@ class LocalHealthRAG:
         
         return None
     
+    def _create_rag_prompt(self, query: str, context: List[Dict[str, Any]]) -> str:
+        """Create comprehensive RAG prompt with context"""
+        # Extract relevant context
+        context_text = ""
+        for i, item in enumerate(context[:3], 1):
+            content = item.get("content", "")
+            title = item.get("title", "Health Information")
+            context_text += f"{i}. {title}: {content[:200]}...\n"
+        
+        prompt = f"""You are a medical assistant helping with a health emergency. Use the provided context to give accurate, helpful advice.
+
+PATIENT QUERY: "{query}"
+
+RELEVANT MEDICAL CONTEXT:
+{context_text}
+
+INSTRUCTIONS:
+- Provide a natural, conversational response (2-3 sentences)
+- Explain what the symptoms could mean based on the context
+- Give clear guidance on what to do
+- Be reassuring but clear about urgency
+- If it's an emergency, emphasize calling 911
+
+RESPONSE:"""
+        
+        return prompt
+    
     def query_health_emergency(self, query: str) -> Dict[str, Any]:
-        """Main query function for health emergencies"""
+        """Main query function for health emergencies with RAG"""
         start_time = time.time()
         
         try:
@@ -417,11 +485,14 @@ class LocalHealthRAG:
                 # Emergency protocol response
                 protocol = self.emergency_protocols[emergency_type]
                 
-                # Generate AI response if model is available
+                # Get additional context from vector search
+                vector_results = self._vector_search(query, k=3)
+                
+                # Generate AI response with context
                 ai_response = None
                 if self.llm_model is not None:
-                    prompt = self._create_emergency_prompt(query, emergency_type, protocol)
-                    ai_response = self._generate_response(prompt, max_length=150)
+                    prompt = self._create_rag_prompt(query, vector_results)
+                    ai_response = self._generate_response(prompt, max_length=200)
                 
                 response = {
                     "emergency_type": emergency_type,
@@ -431,25 +502,26 @@ class LocalHealthRAG:
                     "call_911": protocol.get("call_911", True),
                     "confidence": 0.9,
                     "source": "emergency_protocols",
+                    "vector_results": vector_results,
                     "ai_response": ai_response,
                     "processing_time": time.time() - start_time
                 }
             else:
-                # General health query with hybrid search
-                hybrid_results = self._hybrid_search(query, k=5)
+                # General health query with hybrid RAG search
+                vector_results = self._hybrid_search(query, k=5)
                 
-                # Generate AI response if model is available
+                # Generate AI response with context
                 ai_response = None
                 if self.llm_model is not None:
-                    prompt = self._create_general_health_prompt(query)
-                    ai_response = self._generate_response(prompt, max_length=150)
+                    prompt = self._create_rag_prompt(query, vector_results)
+                    ai_response = self._generate_response(prompt, max_length=200)
                 
                 response = {
                     "emergency_type": "general_health",
-                    "vector_results": hybrid_results,
-                    "call_911": any(r.get("emergency_level") == "critical" for r in hybrid_results),
-                    "confidence": max([r.get("score", 0) for r in hybrid_results], default=0.3),
-                    "source": "hybrid_search",
+                    "vector_results": vector_results,
+                    "call_911": any(r.get("emergency_level") == "critical" for r in vector_results),
+                    "confidence": max([r.get("score", 0) for r in vector_results], default=0.3),
+                    "source": "rag_search",
                     "ai_response": ai_response,
                     "processing_time": time.time() - start_time
                 }
@@ -469,40 +541,6 @@ class LocalHealthRAG:
                 "processing_time": time.time() - start_time,
                 "natural_response": "I'm unable to process this health emergency. Please call 911 immediately."
             }
-    
-    def _create_emergency_prompt(self, query: str, emergency_type: str, protocol: Dict) -> str:
-        """Create prompt for emergency response generation"""
-        emergency_name = emergency_type.replace('_', ' ').title()
-        immediate_actions = protocol.get("immediate_actions", [])[:3]
-        warning_signs = protocol.get("warning_signs", [])[:3]
-        call_911 = protocol.get("call_911", True)
-        
-        prompt = f"""You are a medical assistant helping with a {emergency_name} emergency. 
-
-Patient Query: "{query}"
-
-Emergency Protocol:
-- Call 911: {call_911}
-- Immediate Actions: {', '.join(immediate_actions)}
-- Warning Signs: {', '.join(warning_signs)}
-
-Provide a natural, conversational response (2-3 sentences) explaining what the symptoms could mean and what to do. Be reassuring but clear about the urgency.
-
-Response:"""
-        
-        return prompt
-    
-    def _create_general_health_prompt(self, query: str) -> str:
-        """Create prompt for general health query generation"""
-        prompt = f"""You are a medical assistant helping with a health concern.
-
-Patient Query: "{query}"
-
-Provide a natural, conversational response (2-3 sentences) explaining what the symptoms could mean and general guidance. Be helpful but always recommend consulting a healthcare provider.
-
-Response:"""
-        
-        return prompt
     
     def _format_natural_response(self, response: Dict[str, Any], query: str) -> str:
         """Format natural language response"""
@@ -536,7 +574,7 @@ Response:"""
             return "Facial drooping is a classic sign of stroke, which is a medical emergency that requires immediate treatment. Time is critical with strokes - the sooner treatment begins, the better the outcome. Call 911 immediately and note the time when symptoms started, as this information is crucial for treatment decisions."
         
         else:
-            # General health response
+            # General health response with context
             vector_results = response.get("vector_results", [])
             if vector_results:
                 best_result = vector_results[0]
@@ -557,22 +595,23 @@ Response:"""
             "vector_index_built": self.vector_index is not None,
             "rag_anything_available": self.rag_anything_client.is_available(),
             "rag_anything_url": self.rag_anything_client.base_url,
+            "device": self.device,
             "system_ready": True
         }
 
 
-def test_local_rag_system():
-    """Test the local RAG system"""
-    print("🧪 Testing Local RAG System")
+def test_windows_rag_system():
+    """Test the Windows RAG system"""
+    print("🧪 Testing Windows RAG System")
     print("=" * 60)
     
     # Configure logging
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     
     try:
-        # Initialize the local RAG system
-        print("🔧 Initializing Local RAG System...")
-        rag_system = LocalHealthRAG()
+        # Initialize the Windows RAG system
+        print("🔧 Initializing Windows RAG System...")
+        rag_system = WindowsRAGSystem()
         
         # Check system status
         status = rag_system.get_system_status()
@@ -583,6 +622,7 @@ def test_local_rag_system():
         print(f"   Embedding Model: {'✅' if status['embedding_model_loaded'] else '❌'}")
         print(f"   Vector Index: {'✅' if status['vector_index_built'] else '❌'}")
         print(f"   RAG-Anything Server: {'✅' if status['rag_anything_available'] else '❌'} ({status['rag_anything_url']})")
+        print(f"   Device: {status['device']}")
         
         # Test queries
         test_queries = [
@@ -627,14 +667,14 @@ def test_local_rag_system():
                     print(f"   {j}. {content}")
                     print(f"      Source: {result_item.get('title', 'Health Guidelines')}")
         
-        print(f"\n✅ Local RAG System Test Completed!")
-        print(f"💡 The system is ready for health emergency assistance!")
+        print(f"\n✅ Windows RAG System Test Completed!")
+        print(f"💡 The system is ready for health emergency assistance on Windows!")
         
     except Exception as e:
-        print(f"❌ Error testing local RAG system: {e}")
+        print(f"❌ Error testing Windows RAG system: {e}")
         import traceback
         traceback.print_exc()
 
 
 if __name__ == "__main__":
-    test_local_rag_system()
+    test_windows_rag_system()

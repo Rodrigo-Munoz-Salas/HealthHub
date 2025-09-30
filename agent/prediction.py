@@ -3,8 +3,11 @@
 # Frontend sends JSON: { session_id, envelope: { user, chat[] } }
 # Not medical advice. Prototype only.
 
-import os, json, re
-from typing import Dict, List, Literal
+import os, json, re, time
+from typing import Dict, List, Literal, Optional
+from uuid import uuid4
+
+import numpy as np
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, field_validator  # Pydantic v2
@@ -21,6 +24,10 @@ rag_system = LocalHealthRAG()
 status = rag_system.get_system_status()
 if not status.get("system_ready", False):
     raise RuntimeError("LocalHealthRAG system is not ready. Check your setup.")
+
+# Guard attributes used for dynamic vector updates
+if not hasattr(rag_system, "doc_ids"):
+    rag_system.doc_ids = []  # type: ignore[attr-defined]
 
 # ─────────────────────────────────────────
 # Config
@@ -188,6 +195,64 @@ def _cap_window(hist: ChatMessageHistory, max_turns: int = CHAT_WINDOW_TURNS):
     if len(msgs) > max_turns:
         hist.messages = type(hist.messages)(msgs[-max_turns:])
 
+
+def _serialize_envelope(session_id: str, envelope: ChatEnvelope) -> str:
+    """Serialize the full chat payload for storage in the vector index."""
+    payload = {
+        "session_id": session_id,
+        "user": envelope.user.model_dump(),
+        "chat": [turn.model_dump() for turn in envelope.chat],
+        "timestamp": time.time(),
+    }
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+
+def _normalize_embeddings(embeddings: np.ndarray) -> np.ndarray:
+    """L2-normalize embeddings similar to faiss.normalize_L2."""
+    if embeddings.ndim == 1:
+        embeddings = embeddings.reshape(1, -1)
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    norms = np.clip(norms, 1e-6, None)
+    return embeddings / norms
+
+
+def _store_in_vector_db(session_id: str, envelope: ChatEnvelope) -> Optional[str]:
+    """Store the serialized envelope in the vector DB for retrieval."""
+    embedding_model = getattr(rag_system, "embedding_model", None)
+    vector_index = getattr(rag_system, "vector_index", None)
+
+    if embedding_model is None or vector_index is None:
+        return None
+
+    serialized = _serialize_envelope(session_id, envelope)
+    embedding = embedding_model.encode([serialized])
+    embedding = np.asarray(embedding, dtype="float32")
+    embedding = _normalize_embeddings(embedding)
+
+    vector_index.add(embedding)
+
+    doc_id = f"user_session::{session_id}::{uuid4().hex[:8]}"
+
+    # Persist metadata so LocalHealthRAG can surface it in results
+    rag_system.doc_ids.append(doc_id)  # type: ignore[attr-defined]
+    rag_system.guidelines[doc_id] = {
+        "title": f"User session {session_id}",
+        "content": serialized,
+        "emergency_level": "user_session",
+        "source": "user_session",
+    }
+
+    # Keep a soft cap on dynamic documents to avoid unbounded growth
+    max_dynamic = 200
+    if len(rag_system.doc_ids) > max_dynamic:  # type: ignore[attr-defined]
+        overflow = len(rag_system.doc_ids) - max_dynamic  # type: ignore[attr-defined]
+        for _ in range(overflow):
+            old_doc_id = rag_system.doc_ids.pop(0)  # type: ignore[attr-defined]
+            rag_system.guidelines.pop(old_doc_id, None)
+            # No efficient way to delete from IndexFlatIP; entries remain but lose metadata
+
+    return doc_id
+
 # ─────────────────────────────────────────
 # FastAPI
 # ─────────────────────────────────────────
@@ -212,6 +277,9 @@ async def chat(req: ChatReq):
     last_user_msg = next((t.content for t in reversed(req.envelope.chat) if t.role == "user"), None)
     if not last_user_msg:
         raise HTTPException(status_code=400, detail="No user message found in 'chat'.")
+
+    # Store the entire envelope in the vector database for continual learning
+    stored_doc_id = _store_in_vector_db(session_id, req.envelope)
 
     # Keep history manually and cap
     hist = get_history(session_id)
@@ -240,12 +308,17 @@ async def chat(req: ChatReq):
     _cap_window(hist, CHAT_WINDOW_TURNS)
 
     # Return both text and structured data so the UI can render it nicely
+    model_name = "TinyLlama" if getattr(rag_system, "llm_model", None) else "RuleBasedFallback"
     return {
         "output": message,
         "data": {
             "prediction": prediction,
             "input_bundle": {"profile": profile_json, "current_input": last_user_msg},
-            "model_info": {"provider": "localrag", "model_name": "LocalHealthRAG", "prompt_version": "v2-rich"},
+            "model_info": {
+                "provider": "localrag",
+                "model_name": model_name,
+                "prompt_version": "v2-rich",
+            },
             # Raw fields that UIs can present directly:
             "emergency_type": result.get("emergency_type"),
             "call_911": bool(result.get("call_911")),
@@ -255,5 +328,6 @@ async def chat(req: ChatReq):
             "vector_results": (result.get("vector_results") or [])[:5],
             "user_id": user_id,
             "session_id": session_id,
+            "vector_document_id": stored_doc_id,
         }
     }
